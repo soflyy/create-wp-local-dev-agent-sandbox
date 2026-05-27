@@ -1,0 +1,18 @@
+{
+  "name": "__PROJECT_NAME__",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local WordPress + AI-agent dev sandbox (Docker).",
+  "scripts": {
+    "start": "docker compose up -d --build",
+    "stop": "docker compose stop",
+    "down": "docker compose down",
+    "restart": "docker compose restart",
+    "logs": "docker compose logs -f",
+    "ps": "docker compose ps",
+    "bash": "docker compose exec workspace bash",
+    "claude": "docker compose exec workspace claude --dangerously-skip-permissions",
+    "wp": "docker compose exec workspace wp",
+    "reset": "docker compose down && rm -rf db wp workspace && docker compose up -d --build"
+  }
+}

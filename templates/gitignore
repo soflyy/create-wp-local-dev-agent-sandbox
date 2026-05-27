@@ -1,0 +1,8 @@
+# Runtime data (bind mounts) — never commit these
+db/
+wp/
+workspace/
+
+# Logs and OS cruft
+*.log
+.DS_Store

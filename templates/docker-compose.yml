@@ -1,0 +1,42 @@
+services:
+  db:
+    image: mariadb:latest
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./db:/var/lib/mysql
+
+  wordpress:
+    image: wordpress:latest
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: ${MARIADB_DATABASE}
+      WORDPRESS_DB_USER: ${MARIADB_USER}
+      WORDPRESS_DB_PASSWORD: ${MARIADB_PASSWORD}
+      # Marks the site as local so e.g. Application Passwords work over plain HTTP.
+      WP_ENVIRONMENT_TYPE: local
+    ports:
+      - "${WP_PORT}:80"
+    volumes:
+      - ./wp:/var/www/html
+
+  # Isolated dev container: Node + Claude Code + PHP + WP-CLI. This is where you
+  # run agents. It mounts the same WordPress files at /wp and reaches the site
+  # over the Docker network (http://wordpress) and the DB at host "db".
+  workspace:
+    build:
+      context: .
+      dockerfile: workspace.Dockerfile
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: ${MARIADB_DATABASE}
+      WORDPRESS_DB_USER: ${MARIADB_USER}
+      WORDPRESS_DB_PASSWORD: ${MARIADB_PASSWORD}
+      # So WP-CLI run here agrees with the wordpress container's environment type.
+      WP_ENVIRONMENT_TYPE: local
+    volumes:
+      - ./workspace:/home/node   # the node user's home — persists Claude login, shell history
+      - ./wp:/wp                 # WordPress files (top-level path, not nested in home)

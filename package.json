@@ -1,0 +1,33 @@
+{
+  "name": "create-wp-local-dev-agent-sandbox",
+  "version": "0.1.0",
+  "description": "Scaffold a local WordPress + AI-agent dev environment (Docker Compose) with WP-CLI and Claude Code in an isolated workspace container.",
+  "type": "module",
+  "bin": {
+    "create-wp-local-dev-agent-sandbox": "index.js"
+  },
+  "files": [
+    "index.js",
+    "templates"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "wordpress",
+    "docker",
+    "mcp",
+    "ai",
+    "agents",
+    "wp-cli",
+    "claude",
+    "scaffold",
+    "create"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/soflyy/create-wp-local-dev-agent-sandbox.git"
+  },
+  "author": "Soflyy",
+  "license": "GPL-2.0-or-later"
+}
