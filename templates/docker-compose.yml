@@ -32,6 +32,7 @@ services:
       - "${WP_PORT}:80"
     volumes:
       - ./wp:/var/www/html
+      - ./php/php.ini:/usr/local/etc/php/conf.d/php.ini:ro   # custom PHP overrides (upload limits, etc.)
 
   # Isolated dev container: Node + Claude Code + PHP + WP-CLI. This is where you
   # run agents. It mounts the same WordPress files at /wp and reaches the site
