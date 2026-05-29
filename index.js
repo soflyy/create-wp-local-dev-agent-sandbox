@@ -3,17 +3,18 @@
  * create-wp-local-dev-agent-sandbox
  *
  * Scaffolds a local WordPress + AI-agent dev environment (Docker Compose) into
- * a target directory. Does NOT run Docker — the scaffolded project ships npm
- * scripts (npm run start / bash / claude / …) for that.
+ * a target directory, then runs `npm run setup` (docker compose up + WordPress
+ * and plugin install). Pass --scaffold-only to write files and skip Docker.
  *
  * Usage:
- *   npm create wp-local-dev-agent-sandbox -- [dir] [--port=8080]
- *   npx create-wp-local-dev-agent-sandbox [dir] [--port=8080]
+ *   npm create wp-local-dev-agent-sandbox -- [dir] [--port=8080] [--scaffold-only]
+ *   npx create-wp-local-dev-agent-sandbox [dir] [--port=8080] [--scaffold-only]
  */
 
 import { readdir, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES = join(HERE, 'templates');
@@ -25,12 +26,13 @@ const RENAME = {
 };
 
 // Key files we refuse to clobber if the target already has them.
-const GUARD = ['docker-compose.yml', 'package.json', '.env', 'workspace.Dockerfile'];
+const GUARD = ['docker-compose.yml', 'package.json', '.env', 'workspace.Dockerfile', 'sandbox.config.json'];
 
 function parseArgs(argv) {
-  const out = { dir: null, port: '8080' };
+  const out = { dir: null, port: '8080', setup: true };
   for (const a of argv) {
     if (a.startsWith('--port=')) out.port = a.slice('--port='.length);
+    else if (a === '--scaffold-only') out.setup = false;
     else if (a === '-h' || a === '--help') out.help = true;
     else if (!a.startsWith('-') && out.dir === null) out.dir = a;
   }
@@ -43,12 +45,15 @@ function usage() {
 Scaffold a local WordPress + AI-agent Docker dev environment.
 
 Usage:
-  npm create wp-local-dev-agent-sandbox -- [dir] [--port=8080]
-  npx create-wp-local-dev-agent-sandbox [dir] [--port=8080]
+  npm create wp-local-dev-agent-sandbox -- [dir] [--port=8080] [--scaffold-only]
+  npx create-wp-local-dev-agent-sandbox [dir] [--port=8080] [--scaffold-only]
 
 Arguments:
-  dir            Target directory (default: current directory)
-  --port=NNNN    Host port for WordPress (default: 8080)
+  dir              Target directory (default: current directory)
+
+Options:
+  --port=NNNN      Host port for WordPress (default: 8080)
+  --scaffold-only  Only write files; skip the automatic \`npm run setup\`
 `);
 }
 
@@ -93,12 +98,33 @@ async function main() {
 
   const cd = args.dir ? args.dir : '.';
   console.log(`\n✔ Scaffolded WordPress + agent sandbox in ${targetDir}\n`);
-  console.log('Next steps:');
+
+  if (!args.setup) {
+    console.log('Next steps:');
+    console.log(`  cd ${cd}`);
+    console.log('  npm run setup        # build, start & install WordPress + plugins (Docker must be running)');
+    console.log(`  open http://localhost:${args.port}   # then log in at /wp-admin with admin / password`);
+    console.log('  npm run start        # subsequent runs: just bring the containers up');
+    console.log('  npm run claude       # launch Claude Code in the workspace');
+    return;
+  }
+
+  console.log('→ Running initial setup (Docker must be running)…\n');
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const res = spawnSync(npm, ['run', 'setup'], { cwd: targetDir, stdio: 'inherit' });
+  if (res.error || res.status !== 0) {
+    console.error('\n✖ Initial setup did not finish (is Docker running?).');
+    console.error('  Your files are scaffolded — retry once Docker is up:');
+    console.error(`    cd ${cd} && npm run setup\n`);
+    process.exit(res.status ?? 1);
+  }
+
+  console.log('\nReady. Next steps:');
+  console.log(`  open http://localhost:${args.port}   # log in at /wp-admin with admin / password`);
   console.log(`  cd ${cd}`);
-  console.log('  npm run start        # build + start containers (Docker must be running)');
-  console.log(`  open http://localhost:${args.port}`);
-  console.log('  npm run bash         # shell into the workspace container');
+  console.log('  npm run start        # bring the stack up next time (it stays up otherwise)');
   console.log('  npm run claude       # launch Claude Code in the workspace');
+  console.log('  npm run bash         # shell into the workspace container');
   console.log('');
 }
 

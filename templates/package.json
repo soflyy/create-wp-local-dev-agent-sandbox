@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Local WordPress + AI-agent dev sandbox (Docker).",
   "scripts": {
+    "setup": "bash scripts/initial-setup.sh",
     "start": "docker compose up -d --build",
     "stop": "docker compose stop",
     "down": "docker compose down",
@@ -13,6 +14,6 @@
     "bash": "docker compose exec workspace bash",
     "claude": "docker compose exec workspace claude --dangerously-skip-permissions",
     "wp": "docker compose exec workspace wp",
-    "reset": "docker compose down && rm -rf db wp workspace && docker compose up -d --build"
+    "reset": "docker compose down && rm -rf db wp workspace && bash scripts/initial-setup.sh"
   }
 }

@@ -17,14 +17,28 @@ All data lives in bind-mounted folders in this directory (`db/`, `wp/`, `workspa
 
 ## Usage
 
+First time:
+
 ```bash
-npm run start     # build + start everything (first run pulls images & installs WordPress)
+npm run setup     # build, start, and install WordPress
 ```
 
-Then open **http://localhost:__WP_PORT__** and finish the WordPress installer.
+`npm run setup` brings the stack up, installs WordPress, and installs/activates the plugins listed in [`sandbox.config.json`](#plugins-sandboxconfigjson). It's idempotent — safe to re-run.
+
+Then open **http://localhost:__WP_PORT__**. WordPress is already installed — log in at **/wp-admin** with:
+
+- **Username:** `admin`
+- **Password:** `password`
+
+Day to day, just bring the containers up:
+
+```bash
+npm run start     # build + start containers
+```
 
 | Script | What it does |
 | --- | --- |
+| `npm run setup` | First-run: start the stack, install WordPress (`admin` / `password`), install plugins |
 | `npm run start` | `docker compose up -d --build` |
 | `npm run stop` | Stop containers (keep data) |
 | `npm run down` | Stop + remove containers (data preserved in `db/`, `wp/`, `workspace/`) |
@@ -35,6 +49,25 @@ Then open **http://localhost:__WP_PORT__** and finish the WordPress installer.
 | `npm run claude` | Launch Claude Code in the workspace (`--dangerously-skip-permissions`, safe because it's contained) |
 | `npm run wp` | Run WP-CLI, e.g. `npm run wp -- plugin list` |
 | `npm run reset` | ⚠️ Wipe all data and rebuild from scratch |
+
+## Plugins (`sandbox.config.json`)
+
+The plugins installed during `npm run setup` are declared in `sandbox.config.json`:
+
+```json
+{
+  "plugins": [
+    { "source": "ai", "activate": true },
+    { "source": "https://github.com/WordPress/mcp-adapter/releases/download/v0.5.0/mcp-adapter.zip", "activate": true }
+  ]
+}
+```
+
+- **`source`** — a [wordpress.org](https://wordpress.org/plugins/) slug (e.g. `"ai"`) or a URL/path to a plugin `.zip`.
+- **`activate`** — activate after install (default `true`).
+- **`version`** — optional, wordpress.org slugs only (e.g. `"5.3"`).
+
+A bare string is shorthand for `{ "source": "<string>", "activate": true }`. After editing, re-run `npm run setup` (it's idempotent — already-installed plugins are skipped), or apply just the plugin step with `bash scripts/install-plugins.sh`.
 
 ## Notes
 
