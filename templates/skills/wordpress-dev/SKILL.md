@@ -27,17 +27,11 @@ login is `admin` / `password`.
 
 [Root for Agents](https://github.com/soflyy/root-for-agents) gives you
 root-equivalent operational access to this install through the `wordpress` MCP
-server. When the plugin is installed and active, its abilities show up as MCP
-tools — prefer them for operating on the site directly:
+server — shell commands, PHP eval in the live WordPress runtime, arbitrary file
+read/write/delete/list, and environment inspection.
 
-- `root-for-agents/file-read`, `file-write`, `file-delete`, `file-list` — read/write
-  any file in the install.
-- `root-for-agents/env-inspect` — WP/PHP versions, paths, active plugins/theme,
-  available CLI tools.
-- `root-for-agents/shell-exec`, `process-exec`, `php-eval` — run shell commands or
-  evaluate PHP in the live WordPress runtime.
-
-It's gated by constants in `wp-config.php`. `ROOT_FOR_AGENTS_ENABLED` (set during
-setup) unlocks the file + env-inspect abilities; the shell and PHP-eval abilities
-additionally need `ROOT_FOR_AGENTS_ALLOW_SHELL` / `ROOT_FOR_AGENTS_ALLOW_EVAL`.
-If an ability isn't listed by the MCP server, its gate isn't set.
+Treat it as a fallback, not a first resort: if a task can't be done through the
+regular MCP tools and WP-CLI would be too cumbersome, reach for Root for Agents.
+Its abilities aren't top-level MCP tools — discover them with
+`mcp-adapter-discover-abilities` and run one (by name, e.g.
+`root-for-agents/shell-exec`) via `mcp-adapter-execute-ability`.
