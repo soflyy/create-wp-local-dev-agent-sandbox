@@ -30,6 +30,7 @@ done
 bash scripts/install-wp.sh
 bash scripts/install-plugins.sh
 bash scripts/connect-mcp.sh
+bash scripts/install-skills.sh
 
 echo ""
 echo "✓ Initial setup complete."
