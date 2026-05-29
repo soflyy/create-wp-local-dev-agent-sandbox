@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#
+# Install & activate the plugins declared in sandbox.config.json (run via
+# `npm run setup`). Idempotent: WP-CLI skips plugins that are already installed.
+# Assumes the stack is up and WordPress is installed.
+#
+# sandbox.config.json format:
+#   { "plugins": [
+#       "ai",                                  // shorthand: wordpress.org slug
+#       { "source": "akismet", "activate": false, "version": "5.3" },
+#       { "source": "https://example.com/plugin.zip", "activate": true }
+#   ]}
+# "source" is a wordpress.org slug or a URL/path to a plugin zip. "activate"
+# defaults to true; "version" is optional (wordpress.org slugs only).
+#
+set -euo pipefail
+
+# This script lives in scripts/ — operate from the project root.
+cd "$(dirname "$0")/.."
+
+CONFIG="sandbox.config.json"
+if [ ! -f "$CONFIG" ]; then
+  echo "→ No $CONFIG — skipping plugins."
+  exit 0
+fi
+
+# Flatten the plugins array to tab-separated rows: source<TAB>activate<TAB>version.
+rows="$(node -e '
+  const fs = require("fs");
+  const cfg = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  for (const p of cfg.plugins ?? []) {
+    const e = typeof p === "string" ? { source: p } : (p || {});
+    if (!e.source) continue;
+    const activate = e.activate === false ? "0" : "1";
+    process.stdout.write([e.source, activate, e.version ?? ""].join("\t") + "\n");
+  }
+' "$CONFIG")"
+
+if [ -z "$rows" ]; then
+  echo "→ No plugins listed in $CONFIG."
+  exit 0
+fi
+
+printf '%s\n' "$rows" | while IFS=$'\t' read -r source activate version; do
+  [ -n "$source" ] || continue
+  args=(plugin install "$source")
+  label="$source${version:+ @$version}"
+  if [ -n "$version" ]; then args+=(--version="$version"); fi
+  if [ "$activate" = "1" ]; then args+=(--activate); label="$label (activate)"; fi
+  echo "→ Plugin: $label"
+  # </dev/null so `docker compose exec` doesn't swallow the loop's remaining rows.
+  docker compose exec -T workspace wp "${args[@]}" </dev/null
+done
+
+echo "✓ Plugins processed."

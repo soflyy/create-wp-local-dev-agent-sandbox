@@ -21,8 +21,9 @@ Then:
 
 ```bash
 cd my-site
-npm run start      # build + start (Docker must be running)
-# open http://localhost:8080
+npm run setup      # first run: build, start & install WordPress (Docker must be running)
+# open http://localhost:8080  → log in at /wp-admin with admin / password
+npm run start      # subsequent runs: just bring the containers up
 npm run bash       # shell into the workspace container
 npm run claude     # launch Claude Code in the workspace
 ```
@@ -35,7 +36,9 @@ my-site/
 ├── workspace.Dockerfile    # Node + Claude Code + PHP + WP-CLI (runs as non-root)
 ├── .env                    # DB creds + WP_PORT
 ├── .gitignore              # ignores the bind-mounted data dirs
-├── package.json            # the npm-scripts UX (start/stop/bash/claude/wp/reset)
+├── package.json            # the npm-scripts UX (setup/start/stop/bash/claude/wp/reset)
+├── sandbox.config.json     # plugins to install on `npm run setup` (+ future params)
+├── scripts/                # initial-setup.sh → install-wp.sh + install-plugins.sh
 └── README.md
 ```
 
@@ -68,8 +71,9 @@ ls /tmp/try-it
 
 # 3. Actually boot it (Docker must be running)
 cd /tmp/try-it
-npm run start            # docker compose up -d --build
-#   → open http://localhost:8090 and finish the WordPress installer
+npm run setup            # up -d --build, then auto-installs WordPress
+#   → open http://localhost:8090 and log in at /wp-admin with admin / password
+#   (after the first run, `npm run start` is all you need)
 
 # 4. Get into the workspace container to test it (lands you in /wp)
 npm run bash

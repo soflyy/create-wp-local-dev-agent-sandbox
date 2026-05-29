@@ -1,0 +1,6 @@
+{
+  "plugins": [
+    { "source": "ai", "activate": true },
+    { "source": "https://github.com/WordPress/mcp-adapter/releases/download/v0.5.0/mcp-adapter.zip", "activate": true }
+  ]
+}

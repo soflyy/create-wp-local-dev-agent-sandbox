@@ -25,7 +25,7 @@ const RENAME = {
 };
 
 // Key files we refuse to clobber if the target already has them.
-const GUARD = ['docker-compose.yml', 'package.json', '.env', 'workspace.Dockerfile'];
+const GUARD = ['docker-compose.yml', 'package.json', '.env', 'workspace.Dockerfile', 'sandbox.config.json'];
 
 function parseArgs(argv) {
   const out = { dir: null, port: '8080' };
@@ -95,8 +95,9 @@ async function main() {
   console.log(`\n✔ Scaffolded WordPress + agent sandbox in ${targetDir}\n`);
   console.log('Next steps:');
   console.log(`  cd ${cd}`);
-  console.log('  npm run start        # build + start containers (Docker must be running)');
+  console.log('  npm run setup        # first run: build, start & install WordPress (admin / password)');
   console.log(`  open http://localhost:${args.port}`);
+  console.log('  npm run start        # subsequent runs: just bring the containers up');
   console.log('  npm run bash         # shell into the workspace container');
   console.log('  npm run claude       # launch Claude Code in the workspace');
   console.log('');
