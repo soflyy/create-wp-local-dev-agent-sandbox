@@ -40,7 +40,7 @@ my-site/
 ├── package.json            # the npm-scripts UX (setup/start/stop/bash/claude/wp/reset)
 ├── sandbox.config.json     # plugins to install on `npm run setup` (+ future params)
 ├── php/php.ini             # custom PHP overrides for the wordpress container (upload limits, etc.)
-├── scripts/                # initial-setup.sh → install-wp / install-plugins / connect-mcp / install-skills
+├── scripts/                # provisioning steps run by initial-setup.sh (install-wp, plugins, root-for-agents, mcp, skills)
 ├── skills/                 # Claude skills installed into the workspace (e.g. wordpress-dev)
 └── README.md
 ```
