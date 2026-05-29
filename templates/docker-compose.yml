@@ -18,6 +18,16 @@ services:
       WORDPRESS_DB_PASSWORD: ${MARIADB_PASSWORD}
       # Marks the site as local so e.g. Application Passwords work over plain HTTP.
       WP_ENVIRONMENT_TYPE: local
+      # Derive the site URL from the request host so the site works without
+      # redirects both from your machine (localhost:${WP_PORT}) and from inside
+      # the Docker network (http://wordpress — used by the Playwright browser).
+      # ($$ is escaped to a literal $ for the generated wp-config.php.)
+      WORDPRESS_CONFIG_EXTRA: |
+        if ( ! empty( $$_SERVER['HTTP_HOST'] ) ) {
+            $$scheme = ( ! empty( $$_SERVER['HTTPS'] ) && $$_SERVER['HTTPS'] !== 'off' ) ? 'https' : 'http';
+            define( 'WP_HOME', $$scheme . '://' . $$_SERVER['HTTP_HOST'] );
+            define( 'WP_SITEURL', $$scheme . '://' . $$_SERVER['HTTP_HOST'] );
+        }
     ports:
       - "${WP_PORT}:80"
     volumes:
@@ -40,3 +50,13 @@ services:
     volumes:
       - ./workspace:/home/node   # the node user's home — persists Claude login, shell history
       - ./wp:/wp                 # WordPress files (top-level path, not nested in home)
+
+  # Playwright MCP server (prebaked image, headless Chromium). Claude in the
+  # workspace connects to it over HTTP at http://playwright:8931/mcp and drives a
+  # browser against the site at http://wordpress. --allowed-hosts must list the
+  # host:port Claude uses (the server otherwise only accepts localhost).
+  playwright:
+    image: mcr.microsoft.com/playwright/mcp:latest
+    restart: unless-stopped
+    init: true
+    command: ["--port", "8931", "--host", "0.0.0.0", "--allowed-hosts", "playwright:8931"]
