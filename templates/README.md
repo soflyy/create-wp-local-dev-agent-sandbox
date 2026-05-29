@@ -58,7 +58,6 @@ The plugins installed during `npm run setup` are declared in `sandbox.config.jso
 ```json
 {
   "plugins": [
-    { "source": "ai", "activate": true },
     { "source": "https://github.com/WordPress/mcp-adapter/releases/download/v0.5.0/mcp-adapter.zip", "activate": true }
   ]
 }
