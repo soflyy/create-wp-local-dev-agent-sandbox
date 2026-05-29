@@ -74,4 +74,4 @@ A bare string is shorthand for `{ "source": "<string>", "activate": true }`. Aft
 - **Working on a plugin/theme?** It lives at `wp/wp-content/plugins/…` (or `themes/…`). Edit it on your machine or from inside the workspace container — same files, served live.
 - **First Claude run:** inside the workspace, run `npm run claude` and use `/login` once. Your login persists in `workspace/` across rebuilds.
 - **WP-CLI** talks to the database automatically over the Docker network.
-- **MCP:** if you use the WordPress MCP stack, point agents at `http://wordpress/wp-json/...` from inside the workspace container (the host port `__WP_PORT__` is not reachable between containers).
+- **MCP:** `npm run setup` connects Claude to WordPress's MCP server (from the [`mcp-adapter`](https://github.com/WordPress/mcp-adapter) plugin) automatically. It uses the stdio transport via WP-CLI — Claude runs `wp mcp-adapter serve` locally in the workspace, so no application password, HTTP, or proxy is involved. The server is registered at user scope (`claude mcp list` shows it); re-add or tweak it with `bash scripts/connect-mcp.sh`.

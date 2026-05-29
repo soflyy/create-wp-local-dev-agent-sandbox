@@ -39,7 +39,7 @@ my-site/
 ├── .gitignore              # ignores the bind-mounted data dirs
 ├── package.json            # the npm-scripts UX (setup/start/stop/bash/claude/wp/reset)
 ├── sandbox.config.json     # plugins to install on `npm run setup` (+ future params)
-├── scripts/                # initial-setup.sh → install-wp.sh + install-plugins.sh
+├── scripts/                # initial-setup.sh → install-wp.sh + install-plugins.sh + connect-mcp.sh
 └── README.md
 ```
 
