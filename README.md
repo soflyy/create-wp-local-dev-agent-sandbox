@@ -2,7 +2,7 @@
 
 Scaffold a local **WordPress + AI-agent** development environment (Docker Compose) — WordPress + MariaDB plus an isolated **workspace** container with Node, [Claude Code](https://claude.com/claude-code), PHP, and WP-CLI ready to go.
 
-It only **scaffolds files**; it never runs Docker. The generated project ships npm scripts (`npm run start`, `npm run bash`, `npm run claude`, …) for that.
+It scaffolds the project **and runs the initial setup** for you — `docker compose up`, then installs WordPress and the configured plugins — so you land on a working site. Pass `--scaffold-only` to just write files and skip Docker. The generated project ships npm scripts (`npm run start`, `npm run bash`, `npm run claude`, …) for everyday use.
 
 ## Usage
 
@@ -15,15 +15,16 @@ npx create-wp-local-dev-agent-sandbox my-site
 
 # choose a host port (default 8080):
 npx create-wp-local-dev-agent-sandbox my-site --port=8090
+
+# just write files, don't touch Docker:
+npx create-wp-local-dev-agent-sandbox my-site --scaffold-only
 ```
 
-Then:
+Docker must be running. When it finishes you have a live site at **http://localhost:8080** — log in at `/wp-admin` with `admin` / `password`. Then:
 
 ```bash
 cd my-site
-npm run setup      # first run: build, start & install WordPress (Docker must be running)
-# open http://localhost:8080  → log in at /wp-admin with admin / password
-npm run start      # subsequent runs: just bring the containers up
+npm run start      # bring the stack up next time (it stays up otherwise)
 npm run bash       # shell into the workspace container
 npm run claude     # launch Claude Code in the workspace
 ```
@@ -56,7 +57,7 @@ The two things you edit:
 - **`index.js`** — the CLI logic (arg parsing, file copying, substitutions)
 - **`templates/`** — the files that get scaffolded (compose file, Dockerfile, the project's `package.json` scripts, etc.)
 
-The scaffolder is a *file generator* — it never runs Docker, and it creates no `wp/`/`db/`/`workspace/` data. Those only appear when Docker runs inside a *generated* project.
+By default the scaffolder also runs `npm run setup` in the generated project (docker compose up + WordPress/plugin install). Use `--scaffold-only` to just generate files — then it creates no `wp/`/`db/`/`workspace/` data, which only appears once Docker runs inside a *generated* project.
 
 ### Test a change end to end
 
@@ -64,14 +65,15 @@ The scaffolder is a *file generator* — it never runs Docker, and it creates no
 cd <this-repo>
 
 # 1. Scaffold into a throwaway dir (use a port that won't clash with other instances)
-node index.js /tmp/try-it --port=8090
+#    Drop --scaffold-only to also build + boot + install in one go (Docker must be running).
+node index.js /tmp/try-it --port=8090 --scaffold-only
 
 # 2. Inspect the generated config files
 ls /tmp/try-it
 
-# 3. Actually boot it (Docker must be running)
+# 3. Boot + provision it (Docker must be running)
 cd /tmp/try-it
-npm run setup            # up -d --build, then auto-installs WordPress
+npm run setup            # up -d --build, then installs WordPress + plugins
 #   → open http://localhost:8090 and log in at /wp-admin with admin / password
 #   (after the first run, `npm run start` is all you need)
 
