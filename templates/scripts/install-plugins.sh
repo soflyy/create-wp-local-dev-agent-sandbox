@@ -45,6 +45,11 @@ printf '%s\n' "$rows" | while IFS=$'\t' read -r source activate version; do
   [ -n "$source" ] || continue
   args=(plugin install "$source")
   label="$source${version:+ @$version}"
+  # wordpress.org slugs are idempotent (already-installed exits 0), but a zip URL
+  # errors on reinstall ("destination folder already exists") — --force fixes it.
+  case "$source" in
+    *://*) args+=(--force) ;;
+  esac
   if [ -n "$version" ]; then args+=(--version="$version"); fi
   if [ "$activate" = "1" ]; then args+=(--activate); label="$label (activate)"; fi
   echo "→ Plugin: $label"
