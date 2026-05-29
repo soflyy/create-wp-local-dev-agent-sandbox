@@ -2,11 +2,12 @@
 
 Local WordPress + AI-agent development sandbox, running on Docker.
 
-Three services:
+Four services:
 
 - **db** — MariaDB
 - **wordpress** — WordPress on `http://localhost:__WP_PORT__`
 - **workspace** — an isolated dev container (Node + Claude Code + PHP + WP-CLI) that mounts the same WordPress files and reaches the site/DB over the Docker network
+- **playwright** — a [Playwright MCP](https://github.com/microsoft/playwright-mcp) server (headless Chromium) that Claude drives to browse the site
 
 All data lives in bind-mounted folders in this directory (`db/`, `wp/`, `workspace/`), so it survives restarts and is browsable on your machine. They're git-ignored.
 
@@ -74,4 +75,6 @@ A bare string is shorthand for `{ "source": "<string>", "activate": true }`. Aft
 - **Working on a plugin/theme?** It lives at `wp/wp-content/plugins/…` (or `themes/…`). Edit it on your machine or from inside the workspace container — same files, served live.
 - **First Claude run:** inside the workspace, run `npm run claude` and use `/login` once. Your login persists in `workspace/` across rebuilds.
 - **WP-CLI** talks to the database automatically over the Docker network.
-- **MCP:** `npm run setup` connects Claude to WordPress's MCP server (from the [`mcp-adapter`](https://github.com/WordPress/mcp-adapter) plugin) automatically. It uses the stdio transport via WP-CLI — Claude runs `wp mcp-adapter serve` locally in the workspace, so no application password, HTTP, or proxy is involved. The server is registered at user scope (`claude mcp list` shows it); re-add or tweak it with `bash scripts/connect-mcp.sh`.
+- **MCP:** `npm run setup` connects Claude to two MCP servers automatically (registered at user scope — `claude mcp list` shows them; re-add or tweak with `bash scripts/connect-mcp.sh`):
+  - **wordpress** — WordPress's own MCP server (from the [`mcp-adapter`](https://github.com/WordPress/mcp-adapter) plugin), over stdio via WP-CLI. Claude runs `wp mcp-adapter serve` locally in the workspace, so no application password, HTTP, or proxy is involved.
+  - **playwright** — the [Playwright MCP](https://github.com/microsoft/playwright-mcp) server (a separate container with headless Chromium), over HTTP. Claude uses it to navigate, click, and screenshot the site. **From the browser, the site is `http://wordpress`** (the Docker-network address), not `localhost:__WP_PORT__` — the site URL is derived from the request host so both work without redirects.

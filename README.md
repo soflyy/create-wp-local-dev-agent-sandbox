@@ -33,7 +33,7 @@ npm run claude     # launch Claude Code in the workspace
 
 ```
 my-site/
-├── docker-compose.yml      # db + wordpress + workspace services
+├── docker-compose.yml      # db + wordpress + workspace + playwright services
 ├── workspace.Dockerfile    # Node + Claude Code + PHP + WP-CLI (runs as non-root)
 ├── .env                    # DB creds + WP_PORT
 ├── .gitignore              # ignores the bind-mounted data dirs
