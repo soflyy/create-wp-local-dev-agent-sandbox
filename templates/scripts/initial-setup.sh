@@ -29,6 +29,7 @@ done
 # in the workspace container. Add more steps here as setup grows.
 bash scripts/install-wp.sh
 bash scripts/install-plugins.sh
+bash scripts/include-root-for-agents.sh
 bash scripts/connect-mcp.sh
 bash scripts/install-skills.sh
 
