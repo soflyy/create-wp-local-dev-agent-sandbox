@@ -6,8 +6,12 @@
   "bin": {
     "create-wp-local-dev-agent-sandbox": "index.js"
   },
+  "exports": {
+    ".": "./engine.js"
+  },
   "files": [
     "index.js",
+    "engine.js",
     "templates"
   ],
   "engines": {

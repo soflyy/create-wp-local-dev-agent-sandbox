@@ -52,6 +52,55 @@ WordPress data, the database, and the workspace home are bind-mounted into `wp/`
 - Node.js >= 18 (to run the CLI and the project's npm scripts)
 - Docker with Compose v2 (to actually run the environment)
 
+## Build your own `npm create` command
+
+This package is also a library. If you ship a WordPress plugin (or a stack of them), you can publish your **own** `create-<brand>` command that scaffolds this same sandbox with your plugins pre-installed — no fork, you just depend on this package.
+
+1. Create a package named `create-<brand>` and add this one as a dependency:
+
+   ```bash
+   mkdir create-oxygen-wp && cd create-oxygen-wp
+   npm init -y
+   npm install create-wp-local-dev-agent-sandbox
+   ```
+
+2. Point its `bin` at a one-file script that calls `create()` with a preset. A preset adds plugins — each entry is a wordpress.org slug, or `{ source, activate?, version? }` where `source` is a slug or a URL/path to a `.zip` (the same format the generated project's `sandbox.config.json` uses):
+
+   ```js
+   #!/usr/bin/env node
+   import { create } from 'create-wp-local-dev-agent-sandbox';
+
+   create({
+     preset: {
+       name: 'oxygen-wp', // so messages read `npm create oxygen-wp`
+       plugins: [
+         { source: 'https://example.com/oxygen.zip', activate: true },
+       ],
+     },
+   });
+   ```
+
+   ```json
+   {
+     "name": "create-oxygen-wp",
+     "type": "module",
+     "bin": { "create-oxygen-wp": "index.js" },
+     "dependencies": { "create-wp-local-dev-agent-sandbox": "^0.3.0" }
+   }
+   ```
+
+3. Publish it. Now anyone can run:
+
+   ```bash
+   npm create oxygen-wp my-site
+   ```
+
+   They get the full sandbox (WordPress + Claude Code + the WordPress & Playwright MCP servers + Root for Agents) **plus your plugins**, installed and activated on the first `npm run setup`.
+
+Your preset's plugins are **appended** to the defaults, so `mcp-adapter` and `root-for-agents` are always present. Everything else — templates, Docker setup, the `npm run …` UX — is inherited from this package, so improvements here flow to every `create-<brand>` that depends on it.
+
+> **Premium plugins:** a *public* `create-<brand>` can only bake in a `.zip` URL that's publicly reachable. For licensed plugins, point at a gated endpoint you control, or have your wrapper read the URL from a prompt or an env var instead of hardcoding it.
+
 ## Contributing
 
 Working on the scaffolder itself, or cutting a release? See [CONTRIBUTING.md](CONTRIBUTING.md).
