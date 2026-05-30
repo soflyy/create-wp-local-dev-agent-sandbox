@@ -1,0 +1,30 @@
+name: Publish to npm
+
+# Publishes to npm whenever a GitHub Release is published. Auth is via npm
+# Trusted Publishing (OIDC) — no tokens stored in the repo. The published
+# version is whatever is in package.json at the released tag, so bump the
+# version and tag before cutting the release:
+#   npm version patch && git push --follow-tags
+# then create a GitHub Release for that tag.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC Trusted Publishing + provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      # Trusted Publishing (OIDC) needs npm >= 11.5.1; Node 20 ships an older npm.
+      - run: npm install -g npm@latest
+      # No dependencies / build step — publish the repo as-is. --provenance and
+      # the OIDC token are supplied automatically by Trusted Publishing.
+      - run: npm publish --provenance --access public

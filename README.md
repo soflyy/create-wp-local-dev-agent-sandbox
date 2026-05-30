@@ -110,6 +110,28 @@ create-wp-local-dev-agent-sandbox /tmp/try-it
 npm unlink -g create-wp-local-dev-agent-sandbox   # when done
 ```
 
+## Releasing a new version
+
+Releases are published to npm **automatically by GitHub Actions** when a GitHub
+Release is published — see [`.github/workflows/publish.yml`](.github/workflows/publish.yml).
+Auth is npm [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC),
+so there are no tokens in the repo and the package ships with build provenance.
+
+**Do not run `npm publish` locally.** To cut a release, from a clean `master`:
+
+```bash
+npm version patch          # or `minor` / `major` — bumps package.json, commits, and tags vX.Y.Z
+git push --follow-tags     # push the commit and the new tag
+gh release create "v$(node -p "require('./package.json').version")" --generate-notes
+```
+
+Publishing the GitHub Release triggers the workflow, which publishes the version
+currently in `package.json` to npm. Watch it with `gh run watch`.
+
+> One-time account setup (already configured): the package's **Trusted Publisher**
+> on npmjs.com must point at this repo and `.github/workflows/publish.yml`.
+> The very first `0.1.0` publish was done manually to create the package.
+
 ## License
 
 GPL-2.0-or-later
