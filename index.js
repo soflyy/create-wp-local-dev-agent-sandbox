@@ -25,8 +25,12 @@ const RENAME = {
   'gitignore': '.gitignore',
 };
 
-// Key files we refuse to clobber if the target already has them.
-const GUARD = ['docker-compose.yml', 'package.json', '.env', 'workspace.Dockerfile', 'sandbox.config.json'];
+// When checking that the target dir is empty, these harmless entries don't count.
+const ALLOWED_EXISTING = new Set([
+  '.git', '.gitignore', '.gitkeep', '.hg', '.svn',
+  '.DS_Store', 'Thumbs.db', '.idea', '.vscode',
+  'LICENSE', 'LICENSE.md', 'README.md',
+]);
 
 function parseArgs(argv) {
   const out = { dir: null, port: '8080', setup: true };
@@ -87,10 +91,12 @@ async function main() {
   await mkdir(targetDir, { recursive: true });
 
   const existing = await readdir(targetDir).catch(() => []);
-  const collisions = existing.filter((f) => GUARD.includes(f));
-  if (collisions.length) {
-    console.error(`\n✖ Refusing to overwrite existing files in ${targetDir}:`);
-    console.error(`  ${collisions.join(', ')}\n`);
+  const blocking = existing.filter((f) => !ALLOWED_EXISTING.has(f));
+  if (blocking.length) {
+    const shown = blocking.slice(0, 5).join(', ') + (blocking.length > 5 ? ', …' : '');
+    console.error(`\n✖ ${targetDir} is not empty (found: ${shown}).`);
+    console.error('  This scaffolder needs an empty directory. Point it at a new one, e.g.:');
+    console.error('    npm create wp-local-dev-agent-sandbox@latest my-site\n');
     process.exit(1);
   }
 
@@ -103,9 +109,10 @@ async function main() {
     console.log('Next steps:');
     console.log(`  cd ${cd}`);
     console.log('  npm run setup        # build, start & install WordPress + plugins (Docker must be running)');
-    console.log(`  open http://localhost:${args.port}   # then log in at /wp-admin with admin / password`);
     console.log('  npm run start        # subsequent runs: just bring the containers up');
     console.log('  npm run claude       # launch Claude Code in the workspace');
+    console.log('');
+    console.log(`Once setup finishes, your site is at http://localhost:${args.port} — log in at /wp-admin with admin / password.`);
     return;
   }
 
@@ -119,12 +126,19 @@ async function main() {
     process.exit(res.status ?? 1);
   }
 
-  console.log('\nReady. Next steps:');
-  console.log(`  open http://localhost:${args.port}   # log in at /wp-admin with admin / password`);
+  console.log('\nEveryday commands:');
   console.log(`  cd ${cd}`);
   console.log('  npm run start        # bring the stack up next time (it stays up otherwise)');
   console.log('  npm run claude       # launch Claude Code in the workspace');
   console.log('  npm run bash         # shell into the workspace container');
+  console.log('');
+  console.log('───────────────────────────────────────────────');
+  console.log('  Your WordPress site is ready:');
+  console.log(`    Site:     http://localhost:${args.port}`);
+  console.log(`    Admin:    http://localhost:${args.port}/wp-admin`);
+  console.log('    Username: admin');
+  console.log('    Password: password');
+  console.log('───────────────────────────────────────────────');
   console.log('');
 }
 
