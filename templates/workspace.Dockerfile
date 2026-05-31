@@ -14,12 +14,24 @@ RUN chmod 0755 /usr/local/bin/wp-cli.phar \
     && printf '#!/bin/sh\nexec php /usr/local/bin/wp-cli.phar --allow-root "$@"\n' > /usr/local/bin/wp \
     && chmod +x /usr/local/bin/wp
 
+# You land in the workspace root (/home/node), with WordPress nested at ./wp.
+# Point WP-CLI there by default so `wp` works from anywhere without --path. A
+# global config file is used (not the wrapper) so an explicit --path still wins.
+ENV WP_CLI_CONFIG_PATH=/etc/wp-cli.yml
+RUN printf 'path: /home/node/wp\n' > /etc/wp-cli.yml
+
+# Composer (PHP dependency manager), available globally as `composer`.
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
+
 RUN npm install -g @anthropic-ai/claude-code
 
 # Run as the image's built-in non-root user (uid 1000) so
 # `claude --dangerously-skip-permissions` is allowed (it refuses to run as root).
 USER node
-WORKDIR /wp
+# The workspace root: WordPress lives at ./wp, and you can check out plugins/
+# themes as siblings and symlink them into wp/wp-content/ (both this container
+# and the wordpress container see them at the same path — see docker-compose.yml).
+WORKDIR /home/node
 
 # Keep the container alive so you can `docker compose exec` into it.
 CMD ["sleep", "infinity"]

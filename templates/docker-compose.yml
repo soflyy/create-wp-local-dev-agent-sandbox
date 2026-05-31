@@ -31,12 +31,18 @@ services:
     ports:
       - "${WP_PORT}:80"
     volumes:
-      - ./wp:/var/www/html
+      - ./workspace/wp:/var/www/html
       - ./php/php.ini:/usr/local/etc/php/conf.d/php.ini:ro   # custom PHP overrides (upload limits, etc.)
+      # Mount the workspace root at the same path the workspace container uses, so
+      # a plugin/theme you check out there and symlink into wp-content resolves
+      # here too (Apache follows the symlink to /home/node/<your-checkout>).
+      - ./workspace:/home/node
 
-  # Isolated dev container: Node + Claude Code + PHP + WP-CLI. This is where you
-  # run agents. It mounts the same WordPress files at /wp and reaches the site
-  # over the Docker network (http://wordpress) and the DB at host "db".
+  # Isolated dev container: Node + Claude Code + PHP + WP-CLI + Composer. This is
+  # where you run agents. You land in the workspace root (/home/node) with
+  # WordPress nested at ./wp — so you can check out plugins/themes as siblings of
+  # wp and symlink them into wp/wp-content/. It reaches the site over the Docker
+  # network (http://wordpress) and the DB at host "db".
   workspace:
     build:
       context: .
@@ -49,8 +55,9 @@ services:
       # So WP-CLI run here agrees with the wordpress container's environment type.
       WP_ENVIRONMENT_TYPE: local
     volumes:
-      - ./workspace:/home/node   # the node user's home — persists Claude login, shell history
-      - ./wp:/wp                 # WordPress files (top-level path, not nested in home)
+      # Workspace root + home: persists your Claude login, shell history, your
+      # plugin/theme checkouts, and WordPress itself (nested at ./wp inside it).
+      - ./workspace:/home/node
 
   # Playwright MCP server (prebaked image, headless Chromium). Claude in the
   # workspace connects to it over HTTP at http://playwright:8931/mcp and drives a
