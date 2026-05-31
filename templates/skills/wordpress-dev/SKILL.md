@@ -8,10 +8,14 @@ description: >-
 
 This WordPress install is split across Docker containers on a shared network:
 
-- **workspace** — where you (Claude) run. Holds the WordPress files at `/wp`
-  (shared with the `wordpress` container) plus WP-CLI, Node, and Claude Code. No
-  web server runs here, but WP-CLI talks to the `db` container directly, so
-  `wp …` works.
+- **workspace** — where you (Claude) run. You land in the workspace root
+  (`/home/node`) with the WordPress files at `wp/` (shared with the `wordpress`
+  container), plus WP-CLI, Node, Composer, and Claude Code. No web server runs
+  here, but WP-CLI talks to the `db` container directly, so `wp …` works. This is
+  your primary way to work: **run `wp …` directly in your shell** for any
+  WordPress operation, and **edit the files under `wp/` directly** — you have
+  full read/write access to the live install, served immediately by the
+  `wordpress` container. Reach for these before any MCP ability.
 - **db** — MariaDB database (reachable on the network as host `db`).
 - **wordpress** — the Apache/PHP web server serving the site at `http://wordpress/`.
 - **playwright** — a headless-Chromium Playwright MCP server; point its browser
@@ -23,15 +27,20 @@ browser) use `http://wordpress/`, e.g. `http://wordpress/wp-login.php`.
 it's a host port mapping, not reachable container-to-container. The wp-admin
 login is `admin` / `password`.
 
-## Root for Agents
+## Agent Connector for WP
 
-[Root for Agents](https://github.com/soflyy/root-for-agents) gives you
-root-equivalent operational access to this install through the `wordpress` MCP
-server — shell commands, PHP eval in the live WordPress runtime, arbitrary file
-read/write/delete/list, and environment inspection.
+[Agent Connector for WP](https://github.com/soflyy/agent-connector-for-wp)
+exposes root-equivalent abilities through the `wordpress` MCP server — shell,
+WP-CLI, PHP eval, file read/write/delete/list, and environment inspection.
 
-Treat it as a fallback, not a first resort: if a task can't be done through the
-regular MCP tools and WP-CLI would be too cumbersome, reach for Root for Agents.
+You rarely need it. Most of its abilities (shell, WP-CLI, file ops) you can
+already do faster from your own shell and filesystem in the workspace — prefer
+those. The one thing it offers that you can't do from the workspace is running
+code **inside the live WordPress runtime**: `agent-connector-for-wp/php-eval`
+executes PHP with WordPress fully loaded (plugins, hooks, the DB), as the web
+server. Reach for it only when a task genuinely needs that — inspecting a hook's
+behavior, calling a plugin's functions, reproducing a request-context bug.
+
 Its abilities aren't top-level MCP tools — discover them with
 `mcp-adapter-discover-abilities` and run one (by name, e.g.
-`root-for-agents/shell-exec`) via `mcp-adapter-execute-ability`.
+`agent-connector-for-wp/php-eval`) via `mcp-adapter-execute-ability`.

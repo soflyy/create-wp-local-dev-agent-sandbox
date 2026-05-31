@@ -2,20 +2,15 @@
 #
 # Install & enable Agent Connector for WP (https://github.com/soflyy/agent-connector-for-wp)
 # — the plugin that exposes root-equivalent abilities (shell, WP-CLI, PHP eval,
-# filesystem) to agents over MCP. It bundles wordpress/mcp-adapter, so the
-# separate "MCP Adapter" plugin is no longer needed; it does need the Abilities
-# API, which the wordpress.org "ai" plugin provides. Run via `npm run setup`.
+# filesystem) to agents over MCP. It bundles wordpress/mcp-adapter (no separate
+# "MCP Adapter" plugin needed) and registers its abilities through the WordPress
+# Abilities API, which is in core as of WordPress 7.0. Run via `npm run setup`.
 # Idempotent.
 #
 set -euo pipefail
 
 # This script lives in scripts/ — operate from the project root.
 cd "$(dirname "$0")/.."
-
-# Abilities API — Agent Connector registers its abilities through it (provided by
-# the "ai" plugin). Already-installed is a no-op; --activate is idempotent.
-echo "→ Installing the Abilities API (the \"ai\" plugin)…"
-docker compose exec -T workspace wp plugin install ai --activate
 
 echo "→ Enabling Agent Connector for WP…"
 # A single wp-config.php constant gates all of the plugin's abilities — it's inert
