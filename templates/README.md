@@ -53,12 +53,13 @@ npm run start     # build + start containers
 
 ## Plugins (`sandbox.config.json`)
 
-The plugins installed during `npm run setup` are declared in `sandbox.config.json`:
+Your own plugins to install during `npm run setup` are declared in `sandbox.config.json`. It ships empty (the MCP/agent plugins are installed separately — see [MCP](#notes) below) — add your own:
 
 ```json
 {
   "plugins": [
-    { "source": "https://github.com/WordPress/mcp-adapter/releases/download/v0.5.0/mcp-adapter.zip", "activate": true }
+    "woocommerce",
+    { "source": "https://example.com/your-plugin.zip", "activate": true }
   ]
 }
 ```
@@ -84,5 +85,5 @@ A bare string is shorthand for `{ "source": "<string>", "activate": true }`. Aft
 - **First Claude run:** inside the workspace, run `npm run claude` and use `/login` once. Your login persists in `workspace/` across rebuilds.
 - **WP-CLI** talks to the database automatically over the Docker network.
 - **MCP:** `npm run setup` connects Claude to two MCP servers automatically (registered at user scope — `claude mcp list` shows them; re-add or tweak with `bash scripts/connect-mcp.sh`):
-  - **wordpress** — WordPress's own MCP server (from the [`mcp-adapter`](https://github.com/WordPress/mcp-adapter) plugin), over HTTP at `http://wordpress/wp-json/mcp/mcp-adapter-default-server`, authenticated with a WordPress Application Password that setup mints for `admin`. (HTTP is used instead of the stdio transport, which tended to drop the connection.) It works over plain HTTP because the site runs as `WP_ENVIRONMENT_TYPE=local`.
+  - **wordpress** — the site's MCP server, provided by [Agent Connector for WP](https://github.com/soflyy/agent-connector-for-wp) (which bundles [`mcp-adapter`](https://github.com/WordPress/mcp-adapter) and uses the [`ai`](https://wordpress.org/plugins/ai/) plugin's Abilities API). Setup installs and enables it, then registers it with Claude through [Automattic's `mcp-wordpress-remote`](https://www.npmjs.com/package/@automattic/mcp-wordpress-remote) — a small stdio proxy Claude runs via `npx` that connects to the site's MCP endpoint (`http://wordpress/wp-json/mcp/mcp-adapter-default-server`) and authenticates with a WordPress Application Password setup mints for `admin`. Agent Connector exposes root-equivalent abilities (shell, WP-CLI, PHP eval, filesystem) to the agent — fine because this is a trusted, throwaway dev sandbox.
   - **playwright** — the [Playwright MCP](https://github.com/microsoft/playwright-mcp) server (a separate container with headless Chromium), over HTTP. Claude uses it to navigate, click, and screenshot the site. **From the browser, the site is `http://wordpress`** (the Docker-network address), not `localhost:__WP_PORT__` — the site URL is derived from the request host so both work without redirects.

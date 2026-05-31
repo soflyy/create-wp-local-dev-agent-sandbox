@@ -32,7 +32,11 @@ RUN printf 'path: /home/node/wp\n' > /etc/wp-cli.yml
 # Composer (PHP dependency manager), available globally as `composer`.
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
-RUN npm install -g @anthropic-ai/claude-code
+# Claude Code, plus the mcp-wordpress-remote stdio proxy that the workspace's
+# Claude uses to reach the site's MCP server. Pre-installing it means the
+# `npx @automattic/mcp-wordpress-remote` in connect-mcp.sh resolves instantly
+# (and offline) instead of fetching on first connection.
+RUN npm install -g @anthropic-ai/claude-code @automattic/mcp-wordpress-remote
 
 # Run as the image's built-in non-root user (uid 1000) so
 # `claude --dangerously-skip-permissions` is allowed (it refuses to run as root).
