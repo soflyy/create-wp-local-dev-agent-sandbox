@@ -40,7 +40,7 @@ fi
 # AllowOverride All, so they take effect).
 echo "→ Enabling pretty permalinks…"
 docker compose exec -T workspace wp rewrite structure '/%postname%/' >/dev/null
-cat > wp/.htaccess <<'HT'
+cat > workspace/wp/.htaccess <<'HT'
 # BEGIN WordPress
 <IfModule mod_rewrite.c>
 RewriteEngine On

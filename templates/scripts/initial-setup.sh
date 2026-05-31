@@ -16,7 +16,7 @@ docker compose up -d --build
 
 echo "→ Waiting for WordPress files and the database…"
 tries=0
-until docker compose exec -T workspace bash -c '[ -f /wp/wp-config.php ] && wp db query "SELECT 1;"' >/dev/null 2>&1; do
+until docker compose exec -T workspace bash -c '[ -f /home/node/wp/wp-config.php ] && wp db query "SELECT 1;"' >/dev/null 2>&1; do
   tries=$((tries + 1))
   if [ "$tries" -gt 60 ]; then
     echo "✖ Timed out waiting for the stack to come up." >&2

@@ -6,10 +6,10 @@ Four services:
 
 - **db** — MariaDB
 - **wordpress** — WordPress on `http://localhost:__WP_PORT__`
-- **workspace** — an isolated dev container (Node + Claude Code + PHP + WP-CLI) that mounts the same WordPress files and reaches the site/DB over the Docker network
+- **workspace** — an isolated dev container (Node + Claude Code + PHP + WP-CLI + Composer) that mounts the same WordPress files and reaches the site/DB over the Docker network
 - **playwright** — a [Playwright MCP](https://github.com/microsoft/playwright-mcp) server (headless Chromium) that Claude drives to browse the site
 
-All data lives in bind-mounted folders in this directory (`db/`, `wp/`, `workspace/`), so it survives restarts and is browsable on your machine. They're git-ignored.
+All data lives in bind-mounted folders in this directory (`db/` and `workspace/` — the latter holds WordPress at `workspace/wp` plus your checkouts), so it survives restarts and is browsable on your machine. They're git-ignored.
 
 ## Requirements
 
@@ -42,11 +42,11 @@ npm run start     # build + start containers
 | `npm run setup` | First-run: start the stack, install WordPress (`admin` / `password`), install plugins |
 | `npm run start` | `docker compose up -d --build` |
 | `npm run stop` | Stop containers (keep data) |
-| `npm run down` | Stop + remove containers (data preserved in `db/`, `wp/`, `workspace/`) |
+| `npm run down` | Stop + remove containers (data preserved in `db/`, `workspace/`) |
 | `npm run restart` | Restart containers |
 | `npm run logs` | Tail logs from all services |
 | `npm run ps` | Show container status |
-| `npm run bash` | Shell into the workspace container (lands in `/wp`) |
+| `npm run bash` | Shell into the workspace container (lands in the workspace root `/home/node`, with WordPress at `wp/`) |
 | `npm run claude` | Launch Claude Code in the workspace (`--dangerously-skip-permissions`, safe because it's contained) |
 | `npm run wp` | Run WP-CLI, e.g. `npm run wp -- plugin list` |
 | `npm run reset` | ⚠️ Wipe all data and rebuild from scratch |
@@ -71,7 +71,16 @@ A bare string is shorthand for `{ "source": "<string>", "activate": true }`. Aft
 
 ## Notes
 
-- **Working on a plugin/theme?** It lives at `wp/wp-content/plugins/…` (or `themes/…`). Edit it on your machine or from inside the workspace container — same files, served live.
+- **Working on a plugin/theme?** Installed ones live at `workspace/wp/wp-content/plugins/…` (or `themes/…`) on your machine — `wp/wp-content/…` from inside the workspace container. Edit them either place — same files, served live.
+- **Developing a plugin/theme from its own repo?** You land in the workspace root (`/home/node`) with WordPress nested at `wp/`, so check it out as a sibling of `wp` and symlink it into place — keeping your repo out of the WordPress tree:
+  ```bash
+  npm run bash                                  # land in the workspace root
+  git clone <your-plugin-repo> my-plugin        # checked out next to wp/, not inside it
+  composer install -d my-plugin                 # Composer is available globally
+  ln -s /home/node/my-plugin wp/wp-content/plugins/my-plugin
+  wp plugin activate my-plugin
+  ```
+  The workspace root is mounted into the wordpress container at the same path, so Apache follows the symlink and serves the plugin live.
 - **First Claude run:** inside the workspace, run `npm run claude` and use `/login` once. Your login persists in `workspace/` across rebuilds.
 - **WP-CLI** talks to the database automatically over the Docker network.
 - **MCP:** `npm run setup` connects Claude to two MCP servers automatically (registered at user scope — `claude mcp list` shows them; re-add or tweak with `bash scripts/connect-mcp.sh`):

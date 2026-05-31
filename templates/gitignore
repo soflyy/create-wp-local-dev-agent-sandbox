@@ -1,6 +1,6 @@
 # Runtime data (bind mounts) — never commit these
 db/
-wp/
+# The workspace root: your Claude login, checkouts, and WordPress (./workspace/wp)
 workspace/
 
 # Logs and OS cruft
