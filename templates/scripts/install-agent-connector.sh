@@ -13,17 +13,21 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "→ Enabling Agent Connector for WP…"
-# A single wp-config.php constant gates all of the plugin's abilities — it's inert
-# without it. We enable it: this is a trusted, throwaway dev sandbox (Claude
-# already runs here with --dangerously-skip-permissions, and the plugin itself
-# refuses to run on a production environment type).
-docker compose exec -T workspace wp config set AGENT_CONNECTOR_FOR_WP_ENABLED true --raw --type=constant >/dev/null
+# The plugin is inert until explicitly switched on. That switch is a WordPress
+# option (flipped from its Settings screen in the admin) — there is no wp-config
+# constant anymore. We set the option directly: this is a trusted, throwaway dev
+# sandbox (Claude already runs here with --dangerously-skip-permissions). The
+# stack marks the site as WP_ENVIRONMENT_TYPE=local (see docker-compose.yml), so
+# the enable toggle alone activates it — no production override needed.
+docker compose exec -T workspace wp option update agent_connector_for_wp_enabled 1 >/dev/null
 
-# Install from the packaged release zip — vendor/ (incl. the bundled mcp-adapter)
-# is baked in, so no composer step is needed. --force reinstalls cleanly on
-# re-run; --activate switches it on (the constant above is its gate).
+# Install from the latest packaged release zip — vendor/ (incl. the bundled
+# mcp-adapter) is baked in, so no composer step is needed. The /releases/latest/
+# URL always resolves to the newest release's asset, so we never pin a version.
+# --force reinstalls cleanly on re-run; --activate activates the plugin (the
+# option set above is what actually exposes its abilities).
 docker compose exec -T workspace wp plugin install \
-  https://github.com/soflyy/agent-connector-for-wp/releases/download/v1.1.0/agent-connector-for-wp.zip \
+  https://github.com/soflyy/agent-connector-for-wp/releases/latest/download/agent-connector-for-wp.zip \
   --force --activate
 
 echo "✓ Agent Connector for WP enabled (shell, WP-CLI, PHP eval, filesystem)."
