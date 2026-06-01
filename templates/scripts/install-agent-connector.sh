@@ -13,19 +13,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "→ Enabling Agent Connector for WP…"
-# The plugin is inert until explicitly switched on. That switch is a WordPress
-# option (flipped from its Settings screen in the admin) — there is no wp-config
-# constant anymore. We set the option directly: this is a trusted, throwaway dev
-# sandbox (Claude already runs here with --dangerously-skip-permissions). The
-# stack marks the site as WP_ENVIRONMENT_TYPE=local (see docker-compose.yml), so
-# the enable toggle alone activates it — no production override needed.
+# The plugin is inert until explicitly switched on. We set the toggles directly:
+# this is a trusted, throwaway dev sandbox (Claude already runs here with
+# --dangerously-skip-permissions). We enable:
+#   - the master plugin toggle,
+#   - the built-in abilities toggle (shell, WP-CLI, PHP eval, filesystem), and
+#   - the production override gate (keeps behavior consistent if env type shifts).
 docker compose exec -T workspace wp option update agent_connector_for_wp_enabled 1 >/dev/null
+docker compose exec -T workspace wp option update agent_connector_for_wp_builtin_abilities 1 >/dev/null
+docker compose exec -T workspace wp option update agent_connector_for_wp_allow_production 1 >/dev/null
 
 # Install from the latest packaged release zip — vendor/ (incl. the bundled
 # mcp-adapter) is baked in, so no composer step is needed. The /releases/latest/
 # URL always resolves to the newest release's asset, so we never pin a version.
-# --force reinstalls cleanly on re-run; --activate activates the plugin (the
-# option set above is what actually exposes its abilities).
+# --force reinstalls cleanly on re-run; --activate activates the plugin.
 docker compose exec -T workspace wp plugin install \
   https://github.com/soflyy/agent-connector-for-wp/releases/latest/download/agent-connector-for-wp.zip \
   --force --activate
