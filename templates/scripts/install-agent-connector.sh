@@ -21,12 +21,13 @@ echo "→ Enabling Agent Connector for WP…"
 # the enable toggle alone activates it — no production override needed.
 docker compose exec -T workspace wp option update agent_connector_for_wp_enabled 1 >/dev/null
 
-# Install from the packaged release zip — vendor/ (incl. the bundled mcp-adapter)
-# is baked in, so no composer step is needed. --force reinstalls cleanly on
-# re-run; --activate activates the plugin (the option set above is what actually
-# exposes its abilities).
+# Install from the latest packaged release zip — vendor/ (incl. the bundled
+# mcp-adapter) is baked in, so no composer step is needed. The /releases/latest/
+# URL always resolves to the newest release's asset, so we never pin a version.
+# --force reinstalls cleanly on re-run; --activate activates the plugin (the
+# option set above is what actually exposes its abilities).
 docker compose exec -T workspace wp plugin install \
-  https://github.com/soflyy/agent-connector-for-wp/releases/download/v1.2.0/agent-connector-for-wp.zip \
+  https://github.com/soflyy/agent-connector-for-wp/releases/latest/download/agent-connector-for-wp.zip \
   --force --activate
 
 echo "✓ Agent Connector for WP enabled (shell, WP-CLI, PHP eval, filesystem)."
