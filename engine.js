@@ -125,6 +125,13 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
   await copyTemplates(TEMPLATES, targetDir, { projectName, port: String(args.port) });
   await applyPreset(targetDir, preset);
 
+  // Pre-create the bind-mount host dirs (see docker-compose.yml). If they don't
+  // exist when the stack first comes up, Docker creates them as root — on Linux
+  // that leaves them owned by root and unwritable from the host.
+  for (const d of ['db', 'workspace/wp']) {
+    await mkdir(join(targetDir, d), { recursive: true });
+  }
+
   const cd = args.dir ? args.dir : '.';
   console.log(`\n✔ Scaffolded WordPress + agent sandbox in ${targetDir}\n`);
 
