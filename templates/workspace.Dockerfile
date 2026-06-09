@@ -38,6 +38,28 @@ COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 # (and offline) instead of fetching on first connection.
 RUN npm install -g @anthropic-ai/claude-code @automattic/mcp-wordpress-remote
 
+# Seed Claude's onboarding flags so a token-authenticated profile
+# (CLAUDE_CODE_OAUTH_TOKEN) goes straight to the prompt instead of stopping on the
+# three first-run gates: the "Select login method" picker, the
+# --dangerously-skip-permissions acceptance warning, and the "trust this folder?"
+# dialog. This is the same mechanism the standalone agent-sandbox uses — and it
+# works here too: the ENTRYPOINT runs for the container's main process
+# (`sleep infinity`) at startup, seeding the persisted /home/node BEFORE any
+# `docker compose exec` reaches Claude. It re-runs on every start and merges into
+# any existing config, so it stays correct across rebuilds and after a manual
+# /login. The home dir is pinned to /home/node (the workspace root by design).
+RUN printf '%s\n' \
+  'const fs=require("fs"),h="/home/node",p=h+"/.claude.json";' \
+  'let c={};try{c=JSON.parse(fs.readFileSync(p,"utf8"))}catch{}' \
+  'c.hasCompletedOnboarding=true;c.bypassPermissionsModeAccepted=true;' \
+  'if(!c.theme)c.theme="dark";' \
+  'c.projects=c.projects||{};c.projects[h]={...(c.projects[h]||{}),hasTrustDialogAccepted:true};' \
+  'fs.writeFileSync(p,JSON.stringify(c,null,2));' \
+  > /usr/local/bin/seed-claude.js \
+  && printf '%s\n' '#!/bin/sh' 'node /usr/local/bin/seed-claude.js 2>/dev/null || true' 'exec "$@"' \
+  > /usr/local/bin/agent-entrypoint \
+  && chmod 0755 /usr/local/bin/agent-entrypoint
+
 # Run as the image's built-in non-root user (uid 1000) so
 # `claude --dangerously-skip-permissions` is allowed (it refuses to run as root).
 USER node
@@ -46,5 +68,7 @@ USER node
 # and the wordpress container see them at the same path — see docker-compose.yml).
 WORKDIR /home/node
 
+# The entrypoint seeds Claude's onboarding flags, then hands off to the CMD.
+ENTRYPOINT ["/usr/local/bin/agent-entrypoint"]
 # Keep the container alive so you can `docker compose exec` into it.
 CMD ["sleep", "infinity"]

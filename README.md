@@ -29,7 +29,7 @@ npm run bash       # shell into the workspace container
 npm run claude     # launch Claude Code in the workspace
 ```
 
-**Tip — skip `/login`:** if you export a `CLAUDE_CODE_OAUTH_TOKEN` in your shell (mint one with `claude setup-token`), `npm run claude` forwards it into the workspace container and Claude is logged in automatically. It's passed by name (`docker compose exec -e CLAUDE_CODE_OAUTH_TOKEN`), so the value never appears on the command line. Otherwise just run `/login` once inside the workspace — it persists in `workspace/` across rebuilds.
+**Auto-login (same as [agent-sandbox](https://github.com/louisreingold/agent-sandbox)):** mint a token once on your host with `claude setup-token` and save it to `~/.agent-sandbox/oauth-token` (or `export CLAUDE_CODE_OAUTH_TOKEN=<token>`). `npm run claude` resolves the token from either source and forwards it into the workspace by name (so the value never appears on the command line), and the workspace's entrypoint pre-clears Claude's three first-run gates (login picker, `--dangerously-skip-permissions` warning, trust-folder dialog) — so Claude lands **straight at the prompt**, logged in, no `/login`. No token found? Claude just starts and you `/login` once; it persists in `workspace/` across rebuilds.
 
 ## What gets scaffolded
 
@@ -42,7 +42,7 @@ my-site/
 ├── package.json            # the npm-scripts UX (setup/start/stop/bash/claude/wp/reset)
 ├── sandbox.config.json     # plugins to install on `npm run setup` (+ future params)
 ├── php/php.ini             # custom PHP overrides for the wordpress container (upload limits, etc.)
-├── scripts/                # provisioning steps run by initial-setup.sh (install-wp, plugins, root-for-agents, mcp, skills)
+├── scripts/                # provisioning steps run by initial-setup.sh (install-wp, plugins, root-for-agents, mcp, skills) + in-workspace.sh (token-resolving launcher for bash/claude)
 ├── skills/                 # Claude skills installed into the workspace (e.g. wordpress-dev)
 └── README.md
 ```
