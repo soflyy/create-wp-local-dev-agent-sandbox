@@ -29,6 +29,8 @@ npm run bash       # shell into the workspace container
 npm run claude     # launch Claude Code in the workspace
 ```
 
+**Tip — skip `/login`:** if you export a `CLAUDE_CODE_OAUTH_TOKEN` in your shell (mint one with `claude setup-token`), `npm run claude` forwards it into the workspace container and Claude is logged in automatically. It's passed by name (`docker compose exec -e CLAUDE_CODE_OAUTH_TOKEN`), so the value never appears on the command line. Otherwise just run `/login` once inside the workspace — it persists in `workspace/` across rebuilds.
+
 ## What gets scaffolded
 
 ```
