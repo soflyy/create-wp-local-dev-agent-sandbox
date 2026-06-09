@@ -18,6 +18,15 @@ services:
       WORDPRESS_DB_PASSWORD: ${MARIADB_PASSWORD}
       # Marks the site as local so e.g. Application Passwords work over plain HTTP.
       WP_ENVIRONMENT_TYPE: local
+      # Run Apache (and chown the WordPress files) as uid/gid 1000 — the same
+      # user the workspace container runs as (node). On Linux, bind mounts keep
+      # the container's uid on the host, so without this the wordpress container
+      # would write wp-content/.htaccess as www-data (uid 33), and neither the
+      # workspace container (WP-CLI, plugin installs) nor your host user could
+      # write into the tree. Anchoring everything to 1000 keeps it writable from
+      # all three. (Docker Desktop on macOS papers over this; native Linux doesn't.)
+      APACHE_RUN_USER: "#1000"
+      APACHE_RUN_GROUP: "#1000"
       # Derive the site URL from the request host so the site works without
       # redirects both from your machine (localhost:${WP_PORT}) and from inside
       # the Docker network (http://wordpress — used by the Playwright browser).

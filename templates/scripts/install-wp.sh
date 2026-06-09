@@ -34,13 +34,16 @@ EOF
 fi
 
 # Pretty permalinks (idempotent). Needed so the REST API is reachable at the
-# clean /wp-json/ paths (e.g. the WordPress MCP server). WP-CLI runs in the
-# workspace, not the Apache container, so its --hard flush can't write the
-# .htaccess — we write the standard rules ourselves (Apache has mod_rewrite +
-# AllowOverride All, so they take effect).
+# clean /wp-json/ paths (e.g. the WordPress MCP server). WP-CLI's --hard flush
+# only writes .htaccess when it detects Apache's mod_rewrite, which it can't from
+# the workspace container — so we write the standard rules ourselves (Apache has
+# mod_rewrite + AllowOverride All, so they take effect). We write from inside the
+# workspace container rather than the host: it owns the WordPress tree (uid 1000,
+# see APACHE_RUN_USER in docker-compose.yml), so this doesn't depend on the host
+# user's uid matching — which it wouldn't, on Linux.
 echo "→ Enabling pretty permalinks…"
 docker compose exec -T workspace wp rewrite structure '/%postname%/' >/dev/null
-cat > workspace/wp/.htaccess <<'HT'
+docker compose exec -T workspace sh -c 'cat > wp/.htaccess' <<'HT'
 # BEGIN WordPress
 <IfModule mod_rewrite.c>
 RewriteEngine On
