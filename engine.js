@@ -141,6 +141,7 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
     console.log('  npm run setup        # build, start & install WordPress + plugins (Docker must be running)');
     console.log('  npm run start        # subsequent runs: just bring the containers up');
     console.log('  npm run claude       # launch Claude Code in the workspace');
+    console.log('  npm run cursor       # launch the Cursor CLI agent in the workspace');
     console.log('');
     console.log(`Once setup finishes, your site is at http://localhost:${args.port} — log in at /wp-admin with admin / password.`);
     return;
@@ -160,6 +161,7 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
   console.log(`  cd ${cd}`);
   console.log('  npm run start        # bring the stack up next time (it stays up otherwise)');
   console.log('  npm run claude       # launch Claude Code in the workspace');
+  console.log('  npm run cursor       # launch the Cursor CLI agent in the workspace');
   console.log('  npm run bash         # shell into the workspace container');
   console.log('');
   console.log('───────────────────────────────────────────────');
