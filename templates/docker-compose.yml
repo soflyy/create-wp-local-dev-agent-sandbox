@@ -47,8 +47,9 @@ services:
       # here too (Apache follows the symlink to /home/node/<your-checkout>).
       - ./workspace:/home/node
 
-  # Isolated dev container: Node + Claude Code + PHP + WP-CLI + Composer. This is
-  # where you run agents. You land in the workspace root (/home/node) with
+  # Isolated dev container: Node + Claude Code + Cursor CLI + PHP + WP-CLI +
+  # Composer. This is where you run agents (Claude via `npm run claude`, Cursor
+  # via `npm run cursor`). You land in the workspace root (/home/node) with
   # WordPress nested at ./wp — so you can check out plugins/themes as siblings of
   # wp and symlink them into wp/wp-content/. It reaches the site over the Docker
   # network (http://wordpress) and the DB at host "db".

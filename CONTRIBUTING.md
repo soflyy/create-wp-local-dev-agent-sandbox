@@ -35,9 +35,11 @@ npm run bash
 #     inside the container, e.g.:
 #       wp plugin list          # WP-CLI talks to the DB over the network
 #       claude --version        # Claude Code is installed
+#       cursor-agent --version  # Cursor CLI is installed
 #       php -v
 #     type `exit` to leave
 npm run claude           # or launch Claude Code directly
+npm run cursor           # or launch the Cursor CLI agent directly
 
 # 5. Useful while testing
 npm run logs             # tail all service logs

@@ -1,8 +1,8 @@
 # create-wp-local-dev-agent-sandbox
 
-Scaffold a local **WordPress + AI-agent** development environment (Docker Compose) — WordPress + MariaDB plus an isolated **workspace** container with Node, [Claude Code](https://claude.com/claude-code), PHP, and WP-CLI ready to go.
+Scaffold a local **WordPress + AI-agent** development environment (Docker Compose) — WordPress + MariaDB plus an isolated **workspace** container with Node, [Claude Code](https://claude.com/claude-code), the [Cursor CLI](https://cursor.com/docs/cli), PHP, and WP-CLI ready to go.
 
-It scaffolds the project **and runs the initial setup** for you — `docker compose up`, then installs WordPress and the configured plugins — so you land on a working site. Pass `--scaffold-only` to just write files and skip Docker. The generated project ships npm scripts (`npm run start`, `npm run bash`, `npm run claude`, …) for everyday use.
+It scaffolds the project **and runs the initial setup** for you — `docker compose up`, then installs WordPress and the configured plugins — so you land on a working site. Pass `--scaffold-only` to just write files and skip Docker. The generated project ships npm scripts (`npm run start`, `npm run bash`, `npm run claude`, `npm run cursor`, …) for everyday use.
 
 ## Usage
 
@@ -27,22 +27,25 @@ cd my-site
 npm run start      # bring the stack up next time (it stays up otherwise)
 npm run bash       # shell into the workspace container
 npm run claude     # launch Claude Code in the workspace
+npm run cursor     # launch the Cursor CLI agent in the workspace
 ```
 
-**Auto-login (same as [agent-sandbox](https://github.com/louisreingold/agent-sandbox)):** mint a token once on your host with `claude setup-token` and save it to `~/.agent-sandbox/oauth-token` (or `export CLAUDE_CODE_OAUTH_TOKEN=<token>`). `npm run claude` resolves the token from either source and forwards it into the workspace by name (so the value never appears on the command line), and the workspace's entrypoint pre-clears Claude's three first-run gates (login picker, `--dangerously-skip-permissions` warning, trust-folder dialog) — so Claude lands **straight at the prompt**, logged in, no `/login`. No token found? Claude just starts and you `/login` once; it persists in `workspace/` across rebuilds.
+**Claude auto-login (same as [agent-sandbox](https://github.com/louisreingold/agent-sandbox)):** mint a token once on your host with `claude setup-token` and save it to `~/.agent-sandbox/oauth-token` (or `export CLAUDE_CODE_OAUTH_TOKEN=<token>`). `npm run claude` resolves the token from either source and forwards it into the workspace by name (so the value never appears on the command line), and the workspace's entrypoint pre-clears Claude's three first-run gates (login picker, `--dangerously-skip-permissions` warning, trust-folder dialog) — so Claude lands **straight at the prompt**, logged in, no `/login`. No token found? Claude just starts and you `/login` once; it persists in `workspace/` across rebuilds.
+
+**Cursor auto-login:** the same flow with a Cursor API key — generate one in the Cursor dashboard (**Settings → API Keys**) and save it to `~/.agent-sandbox/cursor-api-key` (or `export CURSOR_API_KEY=<key>`). `npm run cursor` resolves and forwards it by name, then launches with `--force --approve-mcps` so the agent runs commands and uses the sandbox's MCP servers without prompting. No key found? Cursor starts unauthenticated and you can `cursor-agent login` once; it persists in `workspace/`.
 
 ## What gets scaffolded
 
 ```
 my-site/
 ├── docker-compose.yml      # db + wordpress + workspace + playwright services
-├── workspace.Dockerfile    # Node + Claude Code + PHP + WP-CLI (runs as non-root)
+├── workspace.Dockerfile    # Node + Claude Code + Cursor CLI + PHP + WP-CLI (runs as non-root)
 ├── .env                    # DB creds + WP_PORT
 ├── .gitignore              # ignores the bind-mounted data dirs
-├── package.json            # the npm-scripts UX (setup/start/stop/bash/claude/wp/reset)
+├── package.json            # the npm-scripts UX (setup/start/stop/bash/claude/cursor/wp/reset)
 ├── sandbox.config.json     # plugins to install on `npm run setup` (+ future params)
 ├── php/php.ini             # custom PHP overrides for the wordpress container (upload limits, etc.)
-├── scripts/                # provisioning steps run by initial-setup.sh (install-wp, plugins, root-for-agents, mcp, skills) + in-workspace.sh (token-resolving launcher for bash/claude)
+├── scripts/                # provisioning steps run by initial-setup.sh (install-wp, plugins, root-for-agents, mcp, skills) + in-workspace.sh (credential-resolving launcher for bash/claude/cursor)
 ├── skills/                 # Claude skills installed into the workspace (e.g. wordpress-dev)
 └── README.md
 ```
@@ -97,7 +100,7 @@ This package is also a library. If you ship a WordPress plugin (or a stack of th
    npm create oxygen-wp my-site
    ```
 
-   They get the full sandbox (WordPress + Claude Code + the WordPress & Playwright MCP servers + Root for Agents) **plus your plugins**, installed and activated on the first `npm run setup`.
+   They get the full sandbox (WordPress + Claude Code + Cursor CLI + the WordPress & Playwright MCP servers + Root for Agents) **plus your plugins**, installed and activated on the first `npm run setup`.
 
 Your preset's plugins are **appended** to the defaults, so `mcp-adapter` and `root-for-agents` are always present. Everything else — templates, Docker setup, the `npm run …` UX — is inherited from this package, so improvements here flow to every `create-<brand>` that depends on it.
 

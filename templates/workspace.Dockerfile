@@ -60,6 +60,19 @@ RUN printf '%s\n' \
   > /usr/local/bin/agent-entrypoint \
   && chmod 0755 /usr/local/bin/agent-entrypoint
 
+# Cursor's CLI agent (`cursor-agent`, also aliased `agent`). Its official
+# installer drops the binary under $HOME/.local/share and symlinks it into
+# $HOME/.local/bin. At runtime ./workspace is bind-mounted over /home/node, which
+# would shadow anything installed into the node user's home — so we install as
+# root (HOME=/root here) and move the whole versioned tree to /usr/local/share,
+# symlinked onto the PATH at /usr/local/bin. That survives the bind mount and is
+# visible to the node user, mirroring how Claude Code lands in /usr/local.
+RUN curl https://cursor.com/install -fsS | bash \
+    && mv "$HOME/.local/share/cursor-agent" /usr/local/share/cursor-agent \
+    && ln -sf /usr/local/share/cursor-agent/versions/*/cursor-agent /usr/local/bin/cursor-agent \
+    && ln -sf /usr/local/bin/cursor-agent /usr/local/bin/agent \
+    && cursor-agent --version
+
 # Run as the image's built-in non-root user (uid 1000) so
 # `claude --dangerously-skip-permissions` is allowed (it refuses to run as root).
 USER node
