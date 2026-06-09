@@ -60,10 +60,13 @@ claude mcp remove playwright --scope user >/dev/null 2>&1 || true
 claude mcp add playwright --scope user --transport http "$PLAYWRIGHT_URL"
 
 # Cursor reads ~/.cursor/mcp.json (same servers, its own format). Merge into any
-# existing file so a manual /login or other servers aren't clobbered. The proxy
+# existing file so a manual login or other servers aren't clobbered. The proxy
 # command + the playwright HTTP url mirror the Claude registrations above.
+# Non-fatal: if the home dir isn't writable (e.g. a root-owned /home/node from
+# scaffolding as a non-1000 host user), warn and continue rather than aborting
+# setup — Claude registration above is independent.
 echo "→ Connecting Cursor to the MCP servers (~/.cursor/mcp.json)…"
-HAS_WP="$HAS_WP" APPPASS="$APPPASS" WP_MCP_URL="$WP_MCP_URL" PLAYWRIGHT_URL="$PLAYWRIGHT_URL" node -e '
+if HAS_WP="$HAS_WP" APPPASS="$APPPASS" WP_MCP_URL="$WP_MCP_URL" PLAYWRIGHT_URL="$PLAYWRIGHT_URL" node -e '
   const fs = require("fs"), os = require("os"), path = require("path");
   const dir = path.join(os.homedir(), ".cursor");
   fs.mkdirSync(dir, { recursive: true });
@@ -87,9 +90,13 @@ HAS_WP="$HAS_WP" APPPASS="$APPPASS" WP_MCP_URL="$WP_MCP_URL" PLAYWRIGHT_URL="$PL
   }
   c.mcpServers.playwright = { url: process.env.PLAYWRIGHT_URL };
   fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n");
-'
-
-echo "✓ MCP servers registered for Claude ('claude mcp list') and Cursor (~/.cursor/mcp.json)."
+'; then
+  echo "✓ MCP servers registered for Claude ('claude mcp list') and Cursor (~/.cursor/mcp.json)."
+else
+  echo "⚠ Could not write ~/.cursor/mcp.json (is /home/node writable by the node user?)." >&2
+  echo "  Skipping Cursor's MCP setup — Claude is registered and unaffected. Fix the" >&2
+  echo "  workspace/ ownership (it must be uid 1000) and re-run: bash scripts/connect-mcp.sh" >&2
+fi
 EOF
 
 echo "✓ Run 'npm run claude' or 'npm run cursor' and use the MCP servers right away."

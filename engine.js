@@ -7,7 +7,7 @@
  * "Build your own npm create command".
  */
 
-import { readdir, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readdir, mkdir, readFile, writeFile, chown } from 'node:fs/promises';
 import { dirname, join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -130,6 +130,21 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
   // that leaves them owned by root and unwritable from the host.
   for (const d of ['db', 'workspace/wp']) {
     await mkdir(join(targetDir, d), { recursive: true });
+  }
+
+  // ./workspace is the workspace container's home (/home/node), and that
+  // container runs as the node user (uid/gid 1000). On Linux a bind mount keeps
+  // the host's ownership, so node can write there only if the host dir is owned
+  // by 1000 — the repo's "anchor everything to uid 1000" model (see
+  // APACHE_RUN_USER in docker-compose.yml), which holds when the default Ubuntu
+  // host user (also 1000) scaffolds. When scaffolding as root the dir would be
+  // root-owned and unwritable, so the agents' configs (~/.claude.json, the seed,
+  // ~/.cursor/mcp.json) silently fail to persist. Align it explicitly. (db/ is
+  // left alone — the mariadb container manages its own datadir ownership.)
+  if (process.getuid && process.getuid() === 0) {
+    for (const d of ['workspace', 'workspace/wp']) {
+      await chown(join(targetDir, d), 1000, 1000);
+    }
   }
 
   const cd = args.dir ? args.dir : '.';
