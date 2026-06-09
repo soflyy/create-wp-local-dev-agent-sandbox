@@ -32,6 +32,7 @@ bash scripts/install-plugins.sh
 bash scripts/install-agent-connector.sh
 bash scripts/connect-mcp.sh
 bash scripts/install-skills.sh
+bash scripts/seed-claude.sh
 
 echo ""
 echo "✓ Initial setup complete."

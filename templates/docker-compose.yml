@@ -54,6 +54,10 @@ services:
       WORDPRESS_DB_PASSWORD: ${MARIADB_PASSWORD}
       # So WP-CLI run here agrees with the wordpress container's environment type.
       WP_ENVIRONMENT_TYPE: local
+      # Tell Claude Code this really is a sandbox, so --dangerously-skip-permissions
+      # doesn't print its acceptance warning. Set on the container, so it's also
+      # inherited by `docker compose exec` (how `npm run claude` reaches Claude).
+      IS_SANDBOX: "1"
     volumes:
       # Workspace root + home: persists your Claude login, shell history, your
       # plugin/theme checkouts, and WordPress itself (nested at ./wp inside it).

@@ -29,7 +29,7 @@ npm run bash       # shell into the workspace container
 npm run claude     # launch Claude Code in the workspace
 ```
 
-**Tip — skip `/login`:** if you export a `CLAUDE_CODE_OAUTH_TOKEN` in your shell (mint one with `claude setup-token`), `npm run claude` forwards it into the workspace container and Claude is logged in automatically. It's passed by name (`docker compose exec -e CLAUDE_CODE_OAUTH_TOKEN`), so the value never appears on the command line. Otherwise just run `/login` once inside the workspace — it persists in `workspace/` across rebuilds.
+**Tip — skip `/login`:** if you export a `CLAUDE_CODE_OAUTH_TOKEN` in your shell (mint one with `claude setup-token`), `npm run claude` forwards it into the workspace container and Claude is logged in automatically — landing straight at the prompt with no onboarding screens (setup pre-clears the first-run gates via `scripts/seed-claude.sh`). It's passed by name (`docker compose exec -e CLAUDE_CODE_OAUTH_TOKEN`), so the value never appears on the command line. Otherwise just run `/login` once inside the workspace — it persists in `workspace/` across rebuilds.
 
 ## What gets scaffolded
 
@@ -42,7 +42,7 @@ my-site/
 ├── package.json            # the npm-scripts UX (setup/start/stop/bash/claude/wp/reset)
 ├── sandbox.config.json     # plugins to install on `npm run setup` (+ future params)
 ├── php/php.ini             # custom PHP overrides for the wordpress container (upload limits, etc.)
-├── scripts/                # provisioning steps run by initial-setup.sh (install-wp, plugins, root-for-agents, mcp, skills)
+├── scripts/                # provisioning steps run by initial-setup.sh (install-wp, plugins, root-for-agents, mcp, skills, seed-claude)
 ├── skills/                 # Claude skills installed into the workspace (e.g. wordpress-dev)
 └── README.md
 ```
