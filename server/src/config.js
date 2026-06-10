@@ -65,10 +65,25 @@ export function loadConfig(env = process.env) {
     // Worker launch tuning
     workerDir: env.WORKER_DIR || '/home/node',
     workerIdleReleaseTimeout: env.WORKER_IDLE_RELEASE_TIMEOUT || null, // seconds, optional
+    // Worker health endpoint, bound inside the container (not published to the
+    // host — no host port consumed). Used for liveness via `curl /readyz`, since
+    // the slim image has no pgrep/ps.
+    workerManagementAddr: env.WORKER_MANAGEMENT_ADDR || '127.0.0.1:8930',
 
     // Cursor fleet API (best-effort enrichment only)
     fleetApiUrl: env.CURSOR_FLEET_API_URL || 'https://api.cursor.com/v0/private-workers',
   };
+
+  // Exposing this API to the network means exposing root-equivalent control of
+  // the Docker host. Refuse to bind a non-loopback address without a bearer
+  // token — otherwise anyone who can reach the port can create/destroy envs.
+  const loopback = new Set(['127.0.0.1', '::1', 'localhost']);
+  if (!loopback.has(config.bind) && !config.apiToken) {
+    throw new Error(
+      `refusing to bind ${config.bind} (network-exposed) without DEVBOX_API_TOKEN. ` +
+        `Set a bearer token (e.g. DEVBOX_API_TOKEN=$(openssl rand -hex 32)) and put this host behind a firewall/VPN.`,
+    );
+  }
 
   // The set of secret strings the logger must redact.
   config.secrets = [config.cursorApiKey, config.githubToken].filter(Boolean);

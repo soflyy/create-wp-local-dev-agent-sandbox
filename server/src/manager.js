@@ -103,7 +103,7 @@ export class Manager {
   async _gather(record) {
     const ps = await docker.ps(record);
     const up = coreUp(ps);
-    const worker = up ? await workerMod.health(record) : { running: false, healthy: false, state: 'down' };
+    const worker = up ? await workerMod.health(record, this.config) : { running: false, healthy: false, state: 'down' };
     const jobState = this.jobs.get(record.id) || null;
     const status = computeStatus({ record, jobState, ps, worker });
     return { ps, worker, status };
@@ -185,7 +185,7 @@ export class Manager {
           continue;
         }
         // Containers up but worker dead → relaunch (this is the supervision).
-        const alive = await workerMod.isRunning(record);
+        const alive = await workerMod.isRunning(record, this.config);
         if (!alive && record.status !== 'stopped') {
           log.info(`[${record.name}] worker not running but stack is up — relaunching`);
           await gitauth.configure(record, this.config);

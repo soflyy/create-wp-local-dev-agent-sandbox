@@ -11,10 +11,9 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { exec } from './docker.js';
 
-const WORKER_MATCH = 'cursor-agent worker'; // pgrep pattern for liveness
-
 // Build the `cursor-agent worker … start` argv. Flags live on the `worker`
 // command (before `start`); CURSOR_API_KEY is read from the env by the binary.
+// --management-addr exposes /readyz inside the container for liveness checks.
 function workerCommand(env, config) {
   const parts = [
     'cursor-agent',
@@ -23,6 +22,8 @@ function workerCommand(env, config) {
     quote(env.name),
     '--worker-dir',
     config.workerDir,
+    '--management-addr',
+    config.workerManagementAddr,
   ];
   if (config.workerIdleReleaseTimeout) {
     parts.push('--idle-release-timeout', String(config.workerIdleReleaseTimeout));
@@ -36,6 +37,10 @@ function quote(s) {
   return `"${String(s).replace(/"/g, '\\"')}"`;
 }
 
+function readyzUrl(config) {
+  return `http://${config.workerManagementAddr}/readyz`;
+}
+
 export async function start(env, config) {
   const cmd = workerCommand(env, config);
   // `sh -lc` so PATH/profile are loaded; detached so it outlives the exec.
@@ -46,23 +51,21 @@ export async function start(env, config) {
   });
 }
 
-// Liveness: is the worker process running in the workspace container?
-export async function isRunning(env) {
+// Liveness via the worker's own /readyz endpoint (the slim image has no
+// pgrep/ps; curl is present). Exit 0 from curl --fail means up + ready.
+export async function isRunning(env, config) {
   try {
-    await exec(env, 'workspace', ['pgrep', '-f', WORKER_MATCH], { timeout: 10_000 });
-    return true; // pgrep exits 0 when a match exists
+    await exec(env, 'workspace', ['curl', '-fsS', '-m', '3', readyzUrl(config)], { timeout: 10_000 });
+    return true;
   } catch {
     return false;
   }
 }
 
-// Stop the worker process without touching the container.
-export async function stop(env) {
-  try {
-    await exec(env, 'workspace', ['pkill', '-f', WORKER_MATCH], { timeout: 10_000 });
-  } catch {
-    /* no process / already gone */
-  }
+// No process-kill tool in the image; the container stop in manager.stop() reaps
+// the worker. Kept as a hook (best-effort) for callers that only stop the worker.
+export async function stop() {
+  /* no-op: container stop reaps the worker (no pkill in the slim image) */
 }
 
 // Read the connection state from the tail of the worker log (host-side, since
@@ -80,7 +83,7 @@ export async function logState(env) {
   }
 }
 
-export async function health(env) {
-  const [running, state] = await Promise.all([isRunning(env), logState(env)]);
+export async function health(env, config) {
+  const [running, state] = await Promise.all([isRunning(env, config), logState(env)]);
   return { running, healthy: running && state === 'connected', state };
 }

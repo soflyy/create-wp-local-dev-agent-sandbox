@@ -19,7 +19,7 @@ It is intentionally dependency-free (bare Node `http`) because it controls Docke
 | `CURSOR_API_KEY` | — | **required** — shared Cursor service-account key |
 | `GITHUB_TOKEN` | — | **required** — shared GitHub token for clone/commit/push |
 | `DEVBOX_PORT` | `4000` | API listen port |
-| `DEVBOX_BIND` | `127.0.0.1` | bind address (keep on loopback) |
+| `DEVBOX_BIND` | `127.0.0.1` | bind address. `0.0.0.0` (or a specific IP) to reach it over the network — **requires `DEVBOX_API_TOKEN`** (the server refuses to start network-exposed without one) and a firewall/VPN |
 | `DEVBOX_API_TOKEN` | — | if set, all routes require `Authorization: Bearer <token>` |
 | `WP_PORT_RANGE` | `9000-9999` | host WP ports to allocate from |
 | `MAX_ENVIRONMENTS` | `25` | hard cap on environments |

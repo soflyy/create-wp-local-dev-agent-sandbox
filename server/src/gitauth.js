@@ -10,9 +10,14 @@
 import { exec } from './docker.js';
 import { log } from './log.js';
 
+// The token is carried in DEVBOX_GH_TOKEN (NOT GH_TOKEN/GITHUB_TOKEN): gh refuses
+// to *store* credentials with `--with-token` when GH_TOKEN/GITHUB_TOKEN is set in
+// the env (it would just use the env var, which the worker process doesn't have).
+// Storing via gh + `gh auth setup-git` persists a credential helper in
+// /home/node so the worker can clone/commit/push without the token in its env.
 const SCRIPT = [
   'set -e',
-  'echo "$GH_TOKEN" | gh auth login --with-token',
+  'printf %s "$DEVBOX_GH_TOKEN" | gh auth login --with-token',
   'gh auth setup-git',
   'git config --global user.name "$GIT_AUTHOR_NAME"',
   'git config --global user.email "$GIT_AUTHOR_EMAIL"',
@@ -21,9 +26,9 @@ const SCRIPT = [
 export async function configure(env, config) {
   try {
     await exec(env, 'workspace', ['sh', '-lc', SCRIPT], {
-      envNames: ['GH_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL'],
+      envNames: ['DEVBOX_GH_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL'],
       envValues: {
-        GH_TOKEN: config.githubToken,
+        DEVBOX_GH_TOKEN: config.githubToken,
         GIT_AUTHOR_NAME: config.gitAuthorName,
         GIT_AUTHOR_EMAIL: config.gitAuthorEmail,
       },
