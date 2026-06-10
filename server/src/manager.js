@@ -11,6 +11,7 @@ import { allocate } from './allocator.js';
 import * as docker from './docker.js';
 import * as workerMod from './worker.js';
 import * as gitauth from './gitauth.js';
+import * as targetrepo from './targetrepo.js';
 import * as fleet from './fleet.js';
 import { computeStatus, coreUp, publicView } from './status.js';
 import { log, redact } from './log.js';
@@ -80,10 +81,12 @@ export class Manager {
       );
       await registry.update(record.id, { setupFinishedAt: new Date().toISOString() });
 
-      // 3. Git auth (non-fatal).
+      // 3. Git auth (non-fatal), then swap the target plugin to a live git
+      //    checkout the worker operates on (fatal — that's the env's purpose).
       this.jobs.set(record.id, 'configuring');
       await registry.update(record.id, { status: 'configuring' });
       await gitauth.configure(record, config);
+      await targetrepo.setup(record, config);
 
       // 4. Start the named worker.
       this.jobs.set(record.id, 'starting-worker');

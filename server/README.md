@@ -8,6 +8,7 @@ It is intentionally dependency-free (bare Node `http`) because it controls Docke
 
 - **Scaffold + boot**: shells out to the scaffolder (`node ../index.js <dir> --port=N --scaffold-only`) then runs `npm run setup` asynchronously (bounded by a build semaphore). The compose project is pinned to `devbox-<name>` via `COMPOSE_PROJECT_NAME`.
 - **Git auth**: configures `gh` + git identity inside the workspace from the shared `GITHUB_TOKEN` (non-fatal).
+- **Target repo**: replaces the release-zip plugin with a live git checkout — clones `TARGET_REPO` into the workspace, runs `composer install --no-dev` in its plugin subdir, symlinks that into `wp-content/plugins/<slug>`, and activates it — so the worker operates on and commits to the real repo. Defaults to [Agent Connector for WP](https://github.com/soflyy/agent-connector-for-wp); set `TARGET_REPO=` empty to disable.
 - **Worker**: launches `cursor-agent worker --name "<name>" --worker-dir /home/node start` detached inside the workspace container, logging to `/home/node/.worker.log`. The worker connects **outbound only** — no inbound port.
 - **Supervision**: a reconcile loop (boot + every ~45s) re-launches a worker whose process died while its stack is up, and reconciles statuses after a server restart. The registry (`data/registry.json`) is the source of truth.
 - **Credentials are shared and server-side** (`CURSOR_API_KEY`, `GITHUB_TOKEN`) — never accepted in request bodies, returned, or logged.
