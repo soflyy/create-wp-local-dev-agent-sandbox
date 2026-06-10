@@ -1,0 +1,17 @@
+{
+  "name": "devbox-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "HTTP control server that manages many WordPress + Cursor worker environments (create-wp-local-dev-agent-sandbox) on one Docker host.",
+  "bin": {
+    "devbox-server": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "GPL-2.0-or-later"
+}
