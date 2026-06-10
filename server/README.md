@@ -33,8 +33,28 @@ It is intentionally dependency-free (bare Node `http`) because it controls Docke
 
 ## Run
 
+Put your tokens in `server/.env` (next to `package.json`). It's gitignored and
+loaded automatically on `npm start` (via Node's built-in env-file support — no
+dependency). Real environment variables already set take precedence, so
+systemd/`export` setups keep working.
+
 ```bash
 cd server
+cp .env.example .env      # then fill in CURSOR_API_KEY, GITHUB_TOKEN, DEVBOX_API_TOKEN
+npm start
+```
+
+`.env` example:
+
+```ini
+CURSOR_API_KEY=sk_...
+GITHUB_TOKEN=ghp_...
+DEVBOX_API_TOKEN=$(openssl rand -hex 32)   # paste a generated value
+```
+
+Or pass them inline / via your process manager instead of a file:
+
+```bash
 CURSOR_API_KEY=… GITHUB_TOKEN=… DEVBOX_API_TOKEN=secret npm start
 ```
 

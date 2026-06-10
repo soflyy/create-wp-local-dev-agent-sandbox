@@ -1,6 +1,10 @@
 #!/usr/bin/env node
-// Devbox control server entrypoint: load config, init the registry, wire routes,
-// start the HTTP server and the reconcile/supervision loop.
+// Devbox control server entrypoint: load .env, load config, init the registry,
+// wire routes, start the HTTP server and the reconcile/supervision loop.
+
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
 
 import { loadConfig } from './config.js';
 import { initLog, log } from './log.js';
@@ -9,9 +13,24 @@ import { Manager } from './manager.js';
 import { buildRoutes } from './routes.js';
 import { createServer } from './http.js';
 
+// Load server/.env (or $DEVBOX_ENV_FILE) into process.env if present, using
+// Node's built-in loader (no dependency). Real environment variables already
+// set take precedence, so systemd/export-based setups keep working.
+function loadDotenv() {
+  const serverRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const envFile = process.env.DEVBOX_ENV_FILE || join(serverRoot, '.env');
+  if (existsSync(envFile)) {
+    process.loadEnvFile(envFile);
+    return envFile;
+  }
+  return null;
+}
+
 async function main() {
+  const envFile = loadDotenv();
   const config = loadConfig();
   initLog(config.secrets);
+  if (envFile) log.info(`loaded env from ${envFile}`);
 
   const registry = await new Registry(config.registryPath).load();
   const manager = new Manager(config, registry);
