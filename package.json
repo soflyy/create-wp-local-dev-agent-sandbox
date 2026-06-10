@@ -1,6 +1,6 @@
 {
   "name": "create-wp-local-dev-agent-sandbox",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Scaffold a local WordPress + AI-agent dev environment (Docker Compose) with WP-CLI, Claude Code, and the Cursor CLI in an isolated workspace container.",
   "type": "module",
   "bin": {
