@@ -1,0 +1,306 @@
+#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+
+const DEFAULT_CONFIG = '/home/node/.cursor/mcp.json';
+const DEFAULT_SERVER = 'wordpress';
+const PROTOCOL_VERSION = '2025-11-25';
+
+function usage(exitCode = 0) {
+  const out = exitCode === 0 ? process.stdout : process.stderr;
+  out.write(`cursor-wp-mcp-helper - call the WordPress MCP server configured for this worker
+
+Usage:
+  cursor-wp-mcp-helper endpoint
+  cursor-wp-mcp-helper tools
+  cursor-wp-mcp-helper discover
+  cursor-wp-mcp-helper info <ability-name>
+  cursor-wp-mcp-helper call <ability-name> [json-parameters]
+  cursor-wp-mcp-helper wp-cli <command-after-wp>
+  cursor-wp-mcp-helper php-eval <php-code>
+  cursor-wp-mcp-helper raw <mcp-method> [json-params]
+
+Options:
+  --config <path>       MCP config file (default: ${DEFAULT_CONFIG})
+  --server <name>       MCP server name in config (default: ${DEFAULT_SERVER})
+  --json                Print compact JSON
+  --help                Show this help
+
+Examples:
+  cursor-wp-mcp-helper discover
+  cursor-wp-mcp-helper wp-cli 'post list --format=json'
+  cursor-wp-mcp-helper php-eval 'return get_bloginfo("name");'
+  cursor-wp-mcp-helper call agent-connector-for-wp/file-list '{"path":"wp-content/plugins"}'
+`);
+  process.exit(exitCode);
+}
+
+function parseArgs(argv) {
+  const options = {
+    configPath: process.env.CURSOR_WP_MCP_CONFIG || DEFAULT_CONFIG,
+    serverName: process.env.CURSOR_WP_MCP_SERVER || DEFAULT_SERVER,
+    json: false,
+  };
+  const args = [];
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--help' || arg === '-h') usage(0);
+    if (arg === '--json') {
+      options.json = true;
+      continue;
+    }
+    if (arg === '--config') {
+      i += 1;
+      if (!argv[i]) die('--config requires a path');
+      options.configPath = argv[i];
+      continue;
+    }
+    if (arg === '--server') {
+      i += 1;
+      if (!argv[i]) die('--server requires a server name');
+      options.serverName = argv[i];
+      continue;
+    }
+    args.push(arg);
+  }
+
+  return { options, args };
+}
+
+function die(message, details) {
+  process.stderr.write(`Error: ${message}\n`);
+  if (details) {
+    process.stderr.write(`${details}\n`);
+  }
+  process.exit(1);
+}
+
+function readConfig(configPath, serverName) {
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  } catch (error) {
+    die(`could not read MCP config at ${configPath}`, error.message);
+  }
+
+  const server = config.mcpServers && config.mcpServers[serverName];
+  if (!server) {
+    const available = Object.keys(config.mcpServers || {}).join(', ') || '(none)';
+    die(`MCP server "${serverName}" not found in ${configPath}`, `Available servers: ${available}`);
+  }
+
+  const env = server.env || {};
+  const endpoint = server.url || env.WP_API_URL;
+  if (!endpoint) {
+    die(`MCP server "${serverName}" does not define url or env.WP_API_URL`);
+  }
+
+  return {
+    server,
+    endpoint,
+    username: env.WP_API_USERNAME || env.WORDPRESS_USERNAME || env.USERNAME,
+    password: env.WP_API_PASSWORD || env.WORDPRESS_PASSWORD || env.PASSWORD,
+  };
+}
+
+function authHeader(mcpConfig) {
+  if (!mcpConfig.username || !mcpConfig.password) {
+    return null;
+  }
+  return `Basic ${Buffer.from(`${mcpConfig.username}:${mcpConfig.password}`).toString('base64')}`;
+}
+
+async function postJson(mcpConfig, payload, sessionId) {
+  const headers = {
+    'content-type': 'application/json',
+    accept: 'application/json',
+  };
+  const authorization = authHeader(mcpConfig);
+  if (authorization) headers.authorization = authorization;
+  if (sessionId) headers['Mcp-Session-Id'] = sessionId;
+
+  const response = await fetch(mcpConfig.endpoint, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch (error) {
+    die(`MCP endpoint returned non-JSON response (${response.status} ${response.statusText})`, text.slice(0, 1000));
+  }
+
+  if (!response.ok || (body && body.error)) {
+    const detail = body && body.error ? JSON.stringify(body.error, null, 2) : JSON.stringify(body, null, 2);
+    die(`MCP request failed (${response.status} ${response.statusText})`, detail);
+  }
+
+  return {
+    response,
+    body,
+  };
+}
+
+async function initialize(mcpConfig) {
+  const init = await postJson(mcpConfig, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: {
+        name: 'cursor-wp-mcp-helper',
+        version: '1.0.0',
+      },
+    },
+  });
+
+  const sessionId = init.response.headers.get('mcp-session-id');
+  if (!sessionId) {
+    die('MCP initialize response did not include an Mcp-Session-Id header');
+  }
+  return sessionId;
+}
+
+async function rpc(mcpConfig, method, params) {
+  const sessionId = await initialize(mcpConfig);
+  const result = await postJson(mcpConfig, {
+    jsonrpc: '2.0',
+    id: 2,
+    method,
+    params: params || {},
+  }, sessionId);
+  return result.body;
+}
+
+async function callTool(mcpConfig, name, args) {
+  return rpc(mcpConfig, 'tools/call', {
+    name,
+    arguments: args || {},
+  });
+}
+
+async function executeAbility(mcpConfig, abilityName, parameters) {
+  return callTool(mcpConfig, 'mcp-adapter-execute-ability', {
+    ability_name: abilityName,
+    parameters: parameters || {},
+  });
+}
+
+function parseJsonArgument(raw, fallback = {}) {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    die(`invalid JSON argument: ${raw}`, error.message);
+  }
+}
+
+function unwrapMcpContent(body) {
+  const result = body && body.result;
+  if (!result) return body;
+  if (result.structuredContent !== undefined) return result.structuredContent;
+
+  const content = result.content;
+  if (Array.isArray(content) && content.length === 1 && content[0].type === 'text') {
+    const text = content[0].text;
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      return text;
+    }
+  }
+  return result;
+}
+
+function printValue(value, compactJson) {
+  if (compactJson) {
+    process.stdout.write(`${JSON.stringify(value)}\n`);
+    return;
+  }
+  if (typeof value === 'string') {
+    process.stdout.write(`${value}\n`);
+    return;
+  }
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function main() {
+  const { options, args } = parseArgs(process.argv.slice(2));
+  const command = args.shift();
+  if (!command) usage(1);
+
+  const mcpConfig = readConfig(path.resolve(options.configPath), options.serverName);
+
+  if (command === 'endpoint') {
+    printValue({
+      server: options.serverName,
+      endpoint: mcpConfig.endpoint,
+      auth: mcpConfig.username && mcpConfig.password ? 'basic' : 'none',
+    }, options.json);
+    return;
+  }
+
+  if (command === 'tools') {
+    printValue(unwrapMcpContent(await rpc(mcpConfig, 'tools/list', {})), options.json);
+    return;
+  }
+
+  if (command === 'discover') {
+    printValue(unwrapMcpContent(await callTool(mcpConfig, 'mcp-adapter-discover-abilities', {})), options.json);
+    return;
+  }
+
+  if (command === 'info') {
+    const abilityName = args.shift();
+    if (!abilityName) die('info requires an ability name');
+    printValue(unwrapMcpContent(await callTool(mcpConfig, 'mcp-adapter-get-ability-info', {
+      ability_name: abilityName,
+    })), options.json);
+    return;
+  }
+
+  if (command === 'call') {
+    const abilityName = args.shift();
+    if (!abilityName) die('call requires an ability name');
+    const parameters = parseJsonArgument(args.join(' '), {});
+    printValue(unwrapMcpContent(await executeAbility(mcpConfig, abilityName, parameters)), options.json);
+    return;
+  }
+
+  if (command === 'wp-cli') {
+    const wpCommand = args.join(' ');
+    if (!wpCommand) die('wp-cli requires the command text that comes after "wp"');
+    printValue(unwrapMcpContent(await executeAbility(mcpConfig, 'agent-connector-for-wp/wp-cli', {
+      command: wpCommand,
+    })), options.json);
+    return;
+  }
+
+  if (command === 'php-eval') {
+    const code = args.join(' ');
+    if (!code) die('php-eval requires PHP code');
+    printValue(unwrapMcpContent(await executeAbility(mcpConfig, 'agent-connector-for-wp/php-eval', {
+      code,
+    })), options.json);
+    return;
+  }
+
+  if (command === 'raw') {
+    const method = args.shift();
+    if (!method) die('raw requires an MCP method name');
+    const params = parseJsonArgument(args.join(' '), {});
+    printValue(await rpc(mcpConfig, method, params), options.json);
+    return;
+  }
+
+  die(`unknown command: ${command}`);
+}
+
+main().catch((error) => {
+  die(error && error.message ? error.message : String(error), error && error.stack ? error.stack : undefined);
+});

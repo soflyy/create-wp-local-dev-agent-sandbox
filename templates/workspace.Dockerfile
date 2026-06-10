@@ -73,6 +73,16 @@ RUN curl https://cursor.com/install -fsS | bash \
     && ln -sf /usr/local/bin/cursor-agent /usr/local/bin/agent \
     && cursor-agent --version
 
+# WordPress MCP helper: a small Node CLI that talks to the site's MCP server over
+# HTTP (initialize → capture Mcp-Session-Id → call abilities), reading the
+# endpoint and credentials from ~/.cursor/mcp.json at runtime — nothing is baked
+# in. Put it on the PATH so any agent can reach the WordPress MCP abilities
+# (php-eval, file ops, discover…) even when native MCP tools aren't surfaced in
+# chat. scripts/install-skills.sh also exposes it at /home/node/bin and ships the
+# cursor-wp-mcp-helper skill that documents it.
+COPY bin/cursor-wp-mcp-helper /usr/local/bin/cursor-wp-mcp-helper
+RUN chmod 0755 /usr/local/bin/cursor-wp-mcp-helper
+
 # Run as the image's built-in non-root user (uid 1000) so
 # `claude --dangerously-skip-permissions` is allowed (it refuses to run as root).
 USER node
