@@ -1,0 +1,66 @@
+// Pure live-status computation. Reconciles three signals the caller gathers:
+//   - jobState: the transient state of an in-flight create/start pipeline (or null)
+//   - ps:       parsed `docker compose ps` for the project
+//   - worker:   { running, healthy, state } from worker.health (or null)
+//
+// Container-up and worker-alive are independent: containers up but worker dead
+// surfaces as "degraded".
+
+export const TRANSIENT = new Set(['scaffolding', 'setting-up', 'configuring', 'starting-worker', 'destroying']);
+
+// Services whose "running" state means the stack is up. Playwright is present
+// but not gated on (it's the heaviest and least essential to core operation).
+const CORE_SERVICES = ['db', 'wordpress', 'workspace'];
+
+function runningServices(ps) {
+  const running = new Set();
+  for (const svc of ps) {
+    const name = svc.Service || svc.service;
+    const state = (svc.State || svc.state || '').toLowerCase();
+    if (name && state === 'running') running.add(name);
+  }
+  return running;
+}
+
+export function coreUp(ps) {
+  const running = runningServices(ps);
+  return CORE_SERVICES.every((s) => running.has(s));
+}
+
+export function anyUp(ps) {
+  return runningServices(ps).size > 0;
+}
+
+export function computeStatus({ record, jobState, ps, worker }) {
+  // An in-flight pipeline wins — it's the authoritative transient state.
+  if (jobState && TRANSIENT.has(jobState)) return jobState;
+
+  // Sticky failure until the user acts (start/destroy).
+  if (record.status === 'failed' && !coreUp(ps)) return 'failed';
+
+  if (!anyUp(ps)) return 'stopped';
+  if (!coreUp(ps)) return 'degraded'; // some but not all core services up
+
+  // Core stack is up. `worker === null` means no Cursor worker is expected for
+  // this env (autostart off) — it's simply running. Otherwise worker liveness
+  // decides running vs degraded.
+  if (worker == null) return 'running';
+  if (worker.running) return 'running';
+  return 'degraded';
+}
+
+// Public-facing view of an environment (no secrets).
+export function publicView(record, { status, worker, fleet }) {
+  return {
+    id: record.id,
+    name: record.name,
+    port: record.port,
+    wpUrl: record.wpUrl,
+    status,
+    worker: worker ? { running: worker.running, healthy: worker.healthy, state: worker.state } : null,
+    createdAt: record.createdAt,
+    workerStartedAt: record.workerStartedAt,
+    lastError: record.lastError,
+    ...(fleet !== undefined ? { fleet } : {}),
+  };
+}
