@@ -148,7 +148,7 @@ function Bubble({ it }) {
   return html`<div class="raw"><pre>${it.text}</pre></div>`;
 }
 
-function SessionView({ session, onChanged }) {
+function SessionView({ session, onChanged, onBack }) {
   const [items, setItems] = useState([]);
   const [partial, setPartial] = useState('');
   const [busy, setBusy] = useState(false);
@@ -201,7 +201,10 @@ function SessionView({ session, onChanged }) {
   return html`
     <section class="main">
       <header class="bar">
-        <div><${StatusDot} status=${session.status} /> <strong>${session.title || id}</strong></div>
+        <div class="bar-title">
+          <button class="back btn small ghost" onClick=${onBack} title="Back to list">‹</button>
+          <${StatusDot} status=${session.status} /> <strong>${session.title || id}</strong>
+        </div>
         <div class="bar-meta muted">
           ${session.envName} · ${session.model || 'default model'} · $${(session.costUsd || 0).toFixed(4)}
           ${session.claudeSessionId && html`· <code title="claude session id">${session.claudeSessionId.slice(0, 8)}</code>`}
@@ -341,12 +344,12 @@ function App() {
   };
 
   return html`
-    <div class="layout">
+    <div class=${`layout ${selected ? 'has-selection' : ''}`}>
       <${Sidebar} sessions=${sessions} envs=${envs} selectedId=${selectedId}
         onSelect=${setSelectedId} onNewSession=${() => setNewSession({})} onNewEnv=${() => setShowNewEnv(true)}
         onEnvAction=${envAction} onSettings=${() => setAuthed(false)} />
       ${selected
-        ? html`<${SessionView} session=${selected} key=${selected.id} onChanged=${refresh} />`
+        ? html`<${SessionView} session=${selected} key=${selected.id} onChanged=${refresh} onBack=${() => setSelectedId(null)} />`
         : html`<section class="main empty"><div class="muted">
             ${envs.length === 0
               ? html`No environments yet. <button class="btn" onClick=${() => setShowNewEnv(true)}>Create an environment</button> to begin.`
