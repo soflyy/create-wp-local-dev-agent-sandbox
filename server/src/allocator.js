@@ -63,13 +63,13 @@ export async function allocate(registry, config, { nameHint } = {}) {
           400,
         );
       }
-      if (usedNames.has(name) || existingProjects.has(`devbox-${name}`)) {
+      if (usedNames.has(name) || existingProjects.has(name)) {
         throw new AllocationError(`name "${name}" is already in use`, 409);
       }
     } else {
       do {
         name = randomName();
-      } while (usedNames.has(name) || existingProjects.has(`devbox-${name}`));
+      } while (usedNames.has(name) || existingProjects.has(name));
     }
 
     // Resolve a unique, currently-free port in the configured range.
@@ -91,7 +91,10 @@ export async function allocate(registry, config, { nameHint } = {}) {
     const record = {
       id,
       name,
-      project: `devbox-${name}`,
+      // Compose project name = the dir basename (the default), so the server's
+      // `docker compose` calls, the project's own `npm run …` scripts, and
+      // `scripts/in-workspace.sh` all target the same project.
+      project: name,
       dir,
       port,
       wpUrl: `http://localhost:${port}`,

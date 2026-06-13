@@ -66,7 +66,15 @@ esac
 # Export so the values are inherited by the container via name-only -e (off argv).
 export CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_TOKEN"
 export CURSOR_API_KEY="$CURSOR_KEY"
-exec docker compose exec \
+
+# Allocate a TTY only when we actually have one. Interactive use (`npm run claude`,
+# `npm run bash`) keeps its TTY; piped/headless callers (e.g. driving
+# `claude -p --output-format stream-json` from a script or server) get a clean,
+# non-TTY pipe — without this, `docker compose exec` errors "the input device is
+# not a TTY".
+TTY_FLAG=""
+[ -t 0 ] || TTY_FLAG="-T"
+exec docker compose exec $TTY_FLAG \
   -e CLAUDE_CODE_OAUTH_TOKEN \
   -e CURSOR_API_KEY \
   workspace "$@"

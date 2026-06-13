@@ -51,6 +51,7 @@ export function loadConfig(env = process.env) {
 
     // Paths
     scaffolderDir: abs(env.SCAFFOLDER_DIR, DEFAULT_SCAFFOLDER_DIR),
+    uiRoot: join(SERVER_ROOT, 'ui'),
     dataDir,
     envsDir: abs(env.DEVBOX_ENVS_DIR, join(dataDir, 'envs')),
     registryPath: join(dataDir, 'registry.json'),
@@ -85,8 +86,22 @@ export function loadConfig(env = process.env) {
     // the slim image has no pgrep/ps.
     workerManagementAddr: env.WORKER_MANAGEMENT_ADDR || '127.0.0.1:8930',
 
+    // Start a Cursor worker automatically on env create (kept available, but the
+    // focus is now Claude sessions). Set CURSOR_WORKER_AUTOSTART=0 to skip — then
+    // an env runs no worker and "running" doesn't depend on worker liveness.
+    cursorWorkerAutostart: env.CURSOR_WORKER_AUTOSTART !== '0',
+
     // Cursor fleet API (best-effort enrichment only)
     fleetApiUrl: env.CURSOR_FLEET_API_URL || 'https://api.cursor.com/v0/private-workers',
+
+    // Claude headless sessions. NO Claude token here on purpose — Claude is
+    // driven through the env's own scripts/in-workspace.sh, which resolves
+    // CLAUDE_CODE_OAUTH_TOKEN from this server process's env (e.g. server/.env)
+    // or ~/.agent-sandbox/oauth-token, exactly like `npm run claude`.
+    sessionsPath: join(dataDir, 'sessions.json'),
+    sessionsDir: join(dataDir, 'sessions'),
+    claudeDefaultModel: env.CLAUDE_DEFAULT_MODEL || null, // null → claude's own default
+    sessionRingBufferSize: parseInt(env.SESSION_RING_BUFFER || '500', 10),
   };
 
   // Exposing this API to the network means exposing root-equivalent control of

@@ -1,17 +1,19 @@
 # devbox-server
 
-A small HTTP control server that manages many **WordPress + Cursor worker** environments — each one a full [`create-wp-local-dev-agent-sandbox`](../README.md) stack — on a single Docker host. Each environment runs a **named Cursor self-hosted worker** (`cursor-agent worker … start --name "<name>"`) so you can dispatch work to it from GitHub (`@cursor <name> …`) and have it commit/push.
+A small HTTP control server (with a web UI) that manages many WordPress devbox environments — each a full [`create-wp-local-dev-agent-sandbox`](../README.md) stack — on a single Docker host, and **drives Claude Code headlessly inside each one** with live streaming to the browser. It also keeps the optional **named Cursor self-hosted worker** per env.
 
-It is intentionally dependency-free (bare Node `http`) because it controls Docker and launches agents — keep its supply-chain surface at zero. It is **not** published to npm (the root package's `files` allowlist excludes `server/`).
+It is dependency-free on the server side (bare Node `http`) because it controls Docker and launches agents — keep its supply-chain surface at zero. The UI is buildless (Preact + htm via CDN). It is **not** published to npm (the root package's `files` allowlist excludes `server/`).
+
+The server is a **thin orchestrator over the scaffolded project's own scripts**: it creates envs the normal way and drives them through `npm run …` and `scripts/in-workspace.sh` (the same proven path `npm run claude` uses), all on the **default compose project** (the dir basename) so the server and the project's scripts always agree.
 
 ## How it works
 
-- **Scaffold + boot**: shells out to the scaffolder (`node ../index.js <dir> --port=N --scaffold-only`) then runs `npm run setup` asynchronously (bounded by a build semaphore). The compose project is pinned to `devbox-<name>` via `COMPOSE_PROJECT_NAME`.
+- **Create**: runs the standard scaffolder once — `node ../index.js <dir> --port=N` — which scaffolds **and** `npm run setup` (build + boot + provision). Default compose project = the env name. Bounded by a build semaphore.
 - **Git auth**: configures `gh` + git identity inside the workspace from the shared `GITHUB_TOKEN` (non-fatal).
-- **Target repo**: replaces the release-zip plugin with a live git checkout — clones `TARGET_REPO` into the workspace, runs `composer install --no-dev` in its plugin subdir, symlinks that into `wp-content/plugins/<slug>`, and activates it — so the worker operates on and commits to the real repo. Defaults to [Agent Connector for WP](https://github.com/soflyy/agent-connector-for-wp); set `TARGET_REPO=` empty to disable.
-- **Worker**: launches `cursor-agent worker --name "<name>" --worker-dir /home/node start` detached inside the workspace container, logging to `/home/node/.worker.log`. The worker connects **outbound only** — no inbound port.
-- **Supervision**: a reconcile loop (boot + every ~45s) re-launches a worker whose process died while its stack is up, and reconciles statuses after a server restart. The registry (`data/registry.json`) is the source of truth.
-- **Credentials are shared and server-side** (`CURSOR_API_KEY`, `GITHUB_TOKEN`) — never accepted in request bodies, returned, or logged.
+- **Target repo**: replaces the release-zip plugin with a live git checkout (clone → `composer install --no-dev` → symlink into `wp-content/plugins/<slug>` → activate), so agents operate on and commit to the real repo. Defaults to [Agent Connector for WP](https://github.com/soflyy/agent-connector-for-wp); `TARGET_REPO=` empty disables it.
+- **Claude sessions**: each user message spawns `claude -p [--resume <id>] --output-format stream-json …` via the env's own `scripts/in-workspace.sh` (so auth = the proven token path; the server holds no Claude token). stdout is streamed to the browser over **SSE**; the session id + result + cost are persisted (`data/sessions.json`, raw events in `data/sessions/<id>.ndjson`). Resumable from the UI **and** by SSH (`bash scripts/in-workspace.sh claude --resume <id>`).
+- **Cursor worker (optional)**: unless `CURSOR_WORKER_AUTOSTART=0`, launches `cursor-agent worker --name "<name>" … start` detached; a reconcile loop (boot + ~45s) re-launches it if it dies and reconciles statuses after a server restart.
+- **Credentials are shared and server-side** (`CURSOR_API_KEY`, `GITHUB_TOKEN`, and the Claude token via in-workspace.sh) — never accepted in request bodies, returned, or logged.
 
 ## Configuration (env)
 
@@ -19,6 +21,10 @@ It is intentionally dependency-free (bare Node `http`) because it controls Docke
 | --- | --- | --- |
 | `CURSOR_API_KEY` | — | **required** — shared Cursor service-account key |
 | `GITHUB_TOKEN` | — | **required** — shared GitHub token for clone/commit/push |
+| `CLAUDE_CODE_OAUTH_TOKEN` | — | for Claude sessions — forwarded by `in-workspace.sh` exactly like `npm run claude` (or put it in `~/.agent-sandbox/oauth-token`). The server keeps no Claude token of its own. |
+| `CLAUDE_DEFAULT_MODEL` | — | optional default model for sessions (e.g. `claude-sonnet-4-6`) |
+| `CURSOR_WORKER_AUTOSTART` | `1` | start a Cursor worker per env; `0` to skip |
+| `SESSION_RING_BUFFER` | `500` | live events buffered per session for late SSE subscribers |
 | `DEVBOX_PORT` | `4000` | API listen port |
 | `DEVBOX_BIND` | `127.0.0.1` | bind address. `0.0.0.0` (or a specific IP) to reach it over the network — **requires `DEVBOX_API_TOKEN`** (the server refuses to start network-exposed without one) and a firewall/VPN |
 | `DEVBOX_API_TOKEN` | — | if set, all routes require `Authorization: Bearer <token>` |
@@ -69,15 +75,28 @@ CURSOR_API_KEY=… GITHUB_TOKEN=… DEVBOX_API_TOKEN=secret npm start
 | `GET` | `/environments/:id/logs?which=setup\|worker\|all&tail=N` | logs |
 | `POST` | `/environments/:id/stop` | stop containers + worker |
 | `POST` | `/environments/:id/start` | bring containers up + re-auth + restart worker |
-| `DELETE` | `/environments/:id` | `compose down -v` + remove the dir |
+| `DELETE` | `/environments/:id` | stop + remove the dir; cascades to its sessions |
+| `POST` | `/environments/:id/sessions` | `{prompt,model?}` → 202; start a Claude session (env must be running) |
+| `POST` | `/sessions/:id/messages` | `{prompt}` → 202; continue the session (`--resume`); 409 if a turn is active |
+| `GET` | `/sessions` / `/sessions/:id` | list / one session (id, claudeSessionId, status, cost, `sshResumeHint`) |
+| `GET` | `/sessions/:id/stream` | **SSE** live stream-json (auth: bearer or `?access_token=`) |
+| `GET` | `/sessions/:id/transcript?tail=N` | full event history (ndjson) |
+| `POST` | `/sessions/:id/interrupt` | SIGINT the active turn |
+| `DELETE` | `/sessions/:id` | forget the session |
 | `GET` | `/host` | host pressure (containers, disk, load, counts) |
+| `GET` | `/` , `/ui/*` | the web UI (static; shell unauthenticated, data APIs authed) |
 
 ```bash
 H='-H Authorization:Bearer secret'
 curl -s $H -XPOST localhost:4000/environments -d '{"name":"my-devbox"}'
-curl -s $H localhost:4000/environments/my-devbox | jq
-curl -s $H 'localhost:4000/environments/my-devbox/logs?which=worker&tail=50'
+curl -s $H -XPOST localhost:4000/environments/my-devbox/sessions -d '{"prompt":"summarize the README"}'
+curl -N $H localhost:4000/sessions/<id>/stream         # live stream-json
+curl -s $H -XPOST localhost:4000/sessions/<id>/messages -d '{"prompt":"now add a CHANGELOG entry"}'
 ```
+
+## Web UI
+
+Open `http://<host>:<port>/` and enter the `DEVBOX_API_TOKEN`. List sessions across all devboxes, watch a session stream live (token-by-token, with tool calls), send messages, interrupt, start a new session (pick a devbox + model), and copy the SSH-resume command. Buildless (Preact + htm from a CDN) — to run fully offline, vendor those into `ui/vendor/`.
 
 ## Scale note
 

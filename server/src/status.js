@@ -41,8 +41,11 @@ export function computeStatus({ record, jobState, ps, worker }) {
   if (!anyUp(ps)) return 'stopped';
   if (!coreUp(ps)) return 'degraded'; // some but not all core services up
 
-  // Core stack is up; worker liveness decides running vs degraded.
-  if (worker && worker.running) return 'running';
+  // Core stack is up. `worker === null` means no Cursor worker is expected for
+  // this env (autostart off) — it's simply running. Otherwise worker liveness
+  // decides running vs degraded.
+  if (worker == null) return 'running';
+  if (worker.running) return 'running';
   return 'degraded';
 }
 

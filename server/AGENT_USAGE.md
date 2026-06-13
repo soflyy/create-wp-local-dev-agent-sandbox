@@ -138,6 +138,25 @@ curl -s -H "Authorization: Bearer $TOK" -X DELETE "$BASE/environments/my-devbox"
   wrong bearer token; `404` = unknown env; `409` = name taken; `503` = at
   capacity or no free port.
 
+## Driving Claude in an environment (optional)
+
+Besides the Cursor worker, you can run **headless Claude sessions** inside an env and stream them:
+
+```bash
+# start a session (env must be running) → 202 {id, claudeSessionId, status, ...}
+curl -s -H "Authorization: Bearer $TOK" -X POST "$BASE/environments/my-devbox/sessions" \
+  -d '{"prompt":"List the plugin files and summarize them.","model":null}'
+# watch it live (Server-Sent Events; token via query since EventSource can't set headers)
+curl -N "$BASE/sessions/<id>/stream?access_token=$TOK"
+# continue the same conversation
+curl -s -H "Authorization: Bearer $TOK" -X POST "$BASE/sessions/<id>/messages" -d '{"prompt":"now write tests"}'
+# full transcript / interrupt
+curl -s -H "Authorization: Bearer $TOK" "$BASE/sessions/<id>/transcript?tail=500"
+curl -s -H "Authorization: Bearer $TOK" -X POST "$BASE/sessions/<id>/interrupt"
+```
+
+The stream is newline-delimited `stream-json`: a `system`/`init` event (with `session_id`), `stream_event` token deltas, `assistant`/`user` messages (incl. `tool_use`/`tool_result`), and a terminal `result` (with `total_cost_usd`). One turn at a time per session (a second `messages` while running → `409`). There's also a web UI at `/`.
+
 ## Typical end-to-end flow
 
 1. `POST /environments {"name":"feature-x"}` → `202`.

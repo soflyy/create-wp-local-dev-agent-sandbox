@@ -1,7 +1,11 @@
-// Thin wrappers over `docker` / `docker compose`. Everything uses execFile with
-// an argv array (no shell) so the only user-controlled value (the env name,
-// already charset-restricted) can't inject. Secrets are passed to children via
-// the `env` option and referenced by name with `-e NAME` — never on argv.
+// Thin wrappers over `docker compose` / `npm` for a scaffolded environment.
+//
+// Everything runs IN the env's directory with the DEFAULT compose project name
+// (the dir basename) — the same project the env's own `npm run …` scripts and
+// `scripts/in-workspace.sh` use. No `-p` override, so the server and the
+// project's scripts always agree. execFile with an argv array (no shell); the
+// only user value (the env name) is charset-restricted. Secrets pass by name
+// (`-e NAME`) with values injected into the child env — never on argv.
 
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
@@ -24,52 +28,36 @@ export function run(file, args, { cwd, env, timeout = DEFAULT_TIMEOUT, input } =
         resolve({ stdout, stderr });
       },
     );
-    if (input !== undefined) {
-      child.stdin.end(input);
-    }
+    if (input !== undefined) child.stdin.end(input);
   });
 }
 
-// Compose invocation pinned to a project + its dir (so we never depend on cwd).
-function composeArgs(env, rest) {
-  return ['compose', '-p', env.project, ...rest];
+// `docker compose <rest>` in the env dir (default project = dir basename).
+export function compose(env, rest, opts = {}) {
+  return run('docker', ['compose', ...rest], { cwd: env.dir, ...opts });
 }
 
-export function compose(env, rest, opts = {}) {
-  return run('docker', composeArgs(env, rest), { cwd: env.dir, ...opts });
+// Run one of the env's own npm scripts (start/stop/down/…) — drives the project
+// through its own scripts rather than a hand-built parallel.
+export function npmRun(env, script, opts = {}) {
+  return run('npm', ['run', script], { cwd: env.dir, ...opts });
 }
 
 // `docker compose ps --format json` → array of service status objects.
 export async function ps(env) {
   try {
     const { stdout } = await compose(env, ['ps', '--format', 'json', '--all']);
-    // Compose emits either a JSON array or newline-delimited JSON objects.
     const trimmed = stdout.trim();
     if (!trimmed) return [];
     if (trimmed.startsWith('[')) return JSON.parse(trimmed);
-    return trimmed
-      .split('\n')
-      .filter(Boolean)
-      .map((l) => JSON.parse(l));
+    return trimmed.split('\n').filter(Boolean).map((l) => JSON.parse(l));
   } catch {
     return [];
   }
 }
 
-export function up(env, { build = true, timeout = 600_000 } = {}) {
-  return compose(env, ['up', '-d', ...(build ? ['--build'] : [])], { timeout });
-}
-
-export function stop(env) {
-  return compose(env, ['stop'], { timeout: 120_000 });
-}
-
-export function down(env, { volumes = false } = {}) {
-  return compose(env, ['down', ...(volumes ? ['-v'] : [])], { timeout: 180_000 });
-}
-
-// Run a command inside a service. `detach` uses `-d` (fire-and-forget); envNames
-// are forwarded by name only (their values come from the spawned child's env).
+// Run a command inside a service. `detach` → `-d`; envNames are forwarded by
+// name only (values come from the spawned child's env).
 export function exec(env, service, argv, { detach = false, envNames = [], envValues = {}, tty = false, timeout } = {}) {
   const flags = [];
   if (detach) flags.push('-d');
@@ -78,7 +66,7 @@ export function exec(env, service, argv, { detach = false, envNames = [], envVal
   return compose(env, ['exec', ...flags, service, ...argv], { env: envValues, timeout });
 }
 
-// List compose projects currently known to the daemon (for name-collision checks).
+// List compose projects known to the daemon (for name-collision checks).
 export async function listProjects() {
   try {
     const { stdout } = await run('docker', ['compose', 'ls', '--all', '--format', 'json']);

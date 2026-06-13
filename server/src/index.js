@@ -10,6 +10,9 @@ import { loadConfig } from './config.js';
 import { initLog, log } from './log.js';
 import { Registry } from './registry.js';
 import { Manager } from './manager.js';
+import { SessionStore } from './sessions.js';
+import { SessionBus } from './sessionbus.js';
+import { ClaudeEngine } from './claude.js';
 import { buildRoutes } from './routes.js';
 import { createServer } from './http.js';
 
@@ -34,14 +37,23 @@ async function main() {
 
   const registry = await new Registry(config.registryPath).load();
   const manager = new Manager(config, registry);
-  const routes = buildRoutes(config, registry, manager);
+
+  // Claude session subsystem.
+  const sessionStore = await new SessionStore(config.sessionsPath).load();
+  await sessionStore.reconcile(); // running → interrupted (resumable; jsonl persists)
+  const sessionBus = new SessionBus(config.sessionRingBufferSize);
+  const claudeEngine = new ClaudeEngine(config, sessionStore, sessionBus);
+  const sessions = { store: sessionStore, engine: claudeEngine, bus: sessionBus };
+
+  const routes = buildRoutes(config, registry, manager, sessions);
   const server = createServer(config, routes);
 
   server.listen(config.port, config.bind, () => {
     log.info(`devbox-server listening on http://${config.bind}:${config.port}`);
     log.info(
       `envs dir: ${config.envsDir} | port range: ${config.portRange.lo}-${config.portRange.hi} | ` +
-        `max: ${config.maxEnvironments} | auth: ${config.apiToken ? 'bearer' : 'none'}`,
+        `max: ${config.maxEnvironments} | auth: ${config.apiToken ? 'bearer' : 'none'} | ` +
+        `worker autostart: ${config.cursorWorkerAutostart ? 'on' : 'off'} | UI: http://${config.bind}:${config.port}/`,
     );
     manager.startReconcileLoop();
   });

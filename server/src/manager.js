@@ -59,40 +59,40 @@ export class Manager {
     try {
       await mkdir(config.envsDir, { recursive: true });
 
-      // 1. Scaffold (fast, files only).
-      this.jobs.set(record.id, 'scaffolding');
-      await this._spawnLogged(
-        'node',
-        [join(config.scaffolderDir, 'index.js'), record.dir, `--port=${record.port}`, '--scaffold-only'],
-        { logPath: record.setupLogPath, truncate: true },
-      );
-
-      // 2. Build + boot + provision (heavy; bounded by the build semaphore).
+      // 1. Create the environment the NORMAL way: the standard scaffolder
+      //    scaffolds the project AND runs `npm run setup` (build + boot +
+      //    provision) in one shot. Default compose project = dir basename =
+      //    record.name, so the project's own scripts + in-workspace.sh agree.
+      //    Bounded by the build semaphore; output captured to the setup log.
       this.jobs.set(record.id, 'setting-up');
       await registry.update(record.id, { status: 'setting-up', setupStartedAt: new Date().toISOString() });
       await this.buildSem.run(() =>
-        this._spawnLogged('npm', ['run', 'setup'], {
-          cwd: record.dir,
+        this._spawnLogged('node', [join(config.scaffolderDir, 'index.js'), record.dir, `--port=${record.port}`], {
           logPath: record.setupLogPath,
-          // Pin the compose project so the env's own scripts and our commands agree.
-          env: { COMPOSE_PROJECT_NAME: record.project },
+          truncate: true,
           timeout: 30 * 60 * 1000,
         }),
       );
       await registry.update(record.id, { setupFinishedAt: new Date().toISOString() });
 
-      // 3. Git auth (non-fatal), then swap the target plugin to a live git
-      //    checkout the worker operates on (fatal — that's the env's purpose).
+      // 2. Git auth (non-fatal), then swap the target plugin to a live git
+      //    checkout (fatal — that's the env's purpose).
       this.jobs.set(record.id, 'configuring');
       await registry.update(record.id, { status: 'configuring' });
       await gitauth.configure(record, config);
       await targetrepo.setup(record, config);
 
-      // 4. Start the named worker.
-      this.jobs.set(record.id, 'starting-worker');
-      await registry.update(record.id, { status: 'starting-worker' });
-      await workerMod.start(record, config);
-      await registry.update(record.id, { status: 'running', workerStartedAt: new Date().toISOString(), lastError: null });
+      // 3. Optionally start the named Cursor worker.
+      if (config.cursorWorkerAutostart) {
+        this.jobs.set(record.id, 'starting-worker');
+        await registry.update(record.id, { status: 'starting-worker' });
+        await workerMod.start(record, config);
+      }
+      await registry.update(record.id, {
+        status: 'running',
+        workerStartedAt: config.cursorWorkerAutostart ? new Date().toISOString() : null,
+        lastError: null,
+      });
     } catch (err) {
       log.error(`[${record.name}] setup failed:`, err.message);
       await registry.update(record.id, { status: 'failed', lastError: truncate(redactErr(err)) });
@@ -106,7 +106,10 @@ export class Manager {
   async _gather(record) {
     const ps = await docker.ps(record);
     const up = coreUp(ps);
-    const worker = up ? await workerMod.health(record, this.config) : { running: false, healthy: false, state: 'down' };
+    // worker === null means "no worker expected" (autostart off) → status ignores it.
+    const worker = up && this.config.cursorWorkerAutostart
+      ? await workerMod.health(record, this.config)
+      : null;
     const jobState = this.jobs.get(record.id) || null;
     const status = computeStatus({ record, jobState, ps, worker });
     return { ps, worker, status };
@@ -123,11 +126,17 @@ export class Manager {
     return Promise.all(this.registry.list().map((r) => this.describe(r, { fleetLookup: false })));
   }
 
+  // Is the env's core stack up (so we can exec claude/agents in it)? Cheap.
+  async usable(record) {
+    return coreUp(await docker.ps(record));
+  }
+
   // ---- lifecycle ----------------------------------------------------------
 
+  // Lifecycle through the env's own npm scripts (default compose project).
+
   async stop(record) {
-    await workerMod.stop(record);
-    await docker.stop(record);
+    await docker.npmRun(record, 'stop', { timeout: 120_000 });
     await this.registry.update(record.id, { status: 'stopped' });
     return this.describe(record);
   }
@@ -135,10 +144,14 @@ export class Manager {
   async start(record) {
     this.jobs.set(record.id, 'starting-worker');
     try {
-      await docker.up(record, { build: false });
+      await docker.npmRun(record, 'start', { timeout: 600_000 }); // up -d --build (cached)
       await gitauth.configure(record, this.config);
-      await workerMod.start(record, this.config);
-      await this.registry.update(record.id, { status: 'running', workerStartedAt: new Date().toISOString(), lastError: null });
+      if (this.config.cursorWorkerAutostart) await workerMod.start(record, this.config);
+      await this.registry.update(record.id, {
+        status: 'running',
+        workerStartedAt: this.config.cursorWorkerAutostart ? new Date().toISOString() : null,
+        lastError: null,
+      });
     } finally {
       this.jobs.delete(record.id);
     }
@@ -148,7 +161,9 @@ export class Manager {
   async destroy(record) {
     this.jobs.set(record.id, 'destroying');
     try {
-      await docker.down(record, { volumes: true }).catch((e) => log.warn(`[${record.name}] down failed:`, e.message));
+      // `npm run down` (compose down). Data is in bind mounts (no named volumes),
+      // so removing the dir clears it.
+      await docker.npmRun(record, 'down', { timeout: 180_000 }).catch((e) => log.warn(`[${record.name}] down failed:`, e.message));
       await rm(record.dir, { recursive: true, force: true }).catch((e) =>
         log.warn(`[${record.name}] dir removal failed:`, e.message),
       );
@@ -187,7 +202,14 @@ export class Manager {
           }
           continue;
         }
-        // Containers up but worker dead → relaunch (this is the supervision).
+        // Containers up. If no worker is expected, just keep status running.
+        if (!this.config.cursorWorkerAutostart) {
+          if (record.status !== 'running' && record.status !== 'stopped') {
+            await this.registry.update(record.id, { status: 'running' });
+          }
+          continue;
+        }
+        // Worker expected but dead → relaunch (this is the supervision).
         const alive = await workerMod.isRunning(record, this.config);
         if (!alive && record.status !== 'stopped') {
           log.info(`[${record.name}] worker not running but stack is up — relaunching`);
