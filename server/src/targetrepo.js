@@ -48,6 +48,17 @@ ln -s "$DEST/$T_SUBDIR" "$PLUGIN_DIR"
 
 echo "→ Activating '$T_SLUG'…"
 wp plugin activate "$T_SLUG"
+
+# If the repo ships a skill installer (convention: abilities-generator), run it
+# so its Claude/Cursor skill(s) are linked into the agents' skills dirs. The skill
+# dirs are made node-writable by install-skills.sh during \`npm run setup\` (which
+# runs before this). Non-fatal — a skill-install hiccup shouldn't fail the env.
+SKILL_INSTALLER="$DEST/abilities-generator/scripts/install-skill.sh"
+if [ -f "$SKILL_INSTALLER" ]; then
+  echo "→ Installing repo skill(s) via abilities-generator/scripts/install-skill.sh…"
+  ( cd "$DEST/abilities-generator" && bash scripts/install-skill.sh ) || echo "  (claude skill install failed; continuing)"
+  ( cd "$DEST/abilities-generator" && CLAUDE_SKILLS_DIR=/home/node/.cursor/skills bash scripts/install-skill.sh ) || echo "  (cursor skill install failed; continuing)"
+fi
 echo "✓ '$T_SLUG' is now served from the git checkout at $DEST"
 `;
 
