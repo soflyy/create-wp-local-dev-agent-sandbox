@@ -22,7 +22,7 @@ The server is a **thin orchestrator over the scaffolded project's own scripts**:
 | `CURSOR_API_KEY` | — | **required** — shared Cursor service-account key |
 | `GITHUB_TOKEN` | — | **required** — shared GitHub token for clone/commit/push |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — | for Claude sessions — forwarded by `in-workspace.sh` exactly like `npm run claude` (or put it in `~/.agent-sandbox/oauth-token`). The server keeps no Claude token of its own. |
-| `CLAUDE_DEFAULT_MODEL` | — | optional default model for sessions (e.g. `claude-sonnet-4-6`) |
+| `CLAUDE_DEFAULT_MODEL` | `opus` | default model for Claude sessions (`opus` → latest Opus 4.8); set any model id to override, per-session via the API |
 | `CURSOR_WORKER_AUTOSTART` | `1` | start a Cursor worker per env; `0` to skip |
 | `SESSION_RING_BUFFER` | `500` | live events buffered per session for late SSE subscribers |
 | `DEVBOX_PORT` | `4000` | API listen port |

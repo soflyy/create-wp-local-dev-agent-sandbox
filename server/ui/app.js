@@ -81,11 +81,15 @@ const TRANSIENT_ENV = ['scaffolding', 'setting-up', 'configuring', 'starting-wor
 function EnvRow({ env, onAction }) {
   const building = TRANSIENT_ENV.includes(env.status);
   const up = env.status === 'running' || env.status === 'degraded';
+  // Link to the WP site on the SAME host the UI was loaded from (not the
+  // server's localhost wpUrl) — so it works from a phone/laptop hitting the
+  // server's IP, and still works from inside the devbox via localhost.
+  const wpUrl = `${location.protocol}//${location.hostname}:${env.port}/`;
   return html`
     <div class="env">
       <div class="env-top">
         <${StatusDot} status=${env.status} /> <span class="env-name">${env.name}</span>
-        <a class="env-port" href=${env.wpUrl} target="_blank" rel="noreferrer" onClick=${(e) => e.stopPropagation()}>:${env.port}</a>
+        <a class="env-port" href=${wpUrl} target="_blank" rel="noreferrer" onClick=${(e) => e.stopPropagation()}>:${env.port}</a>
       </div>
       <div class="env-actions">
         ${building
@@ -227,12 +231,11 @@ function SessionView({ session, onChanged }) {
 function NewSessionModal({ envs, preselect, onClose, onCreate }) {
   const usable = envs.filter((e) => e.status === 'running' || e.status === 'degraded');
   const [envId, setEnvId] = useState(preselect || (usable[0] && usable[0].id));
-  const [model, setModel] = useState('');
   const [prompt, setPrompt] = useState('');
   const [err, setErr] = useState('');
   const create = async () => {
     if (!envId || !prompt.trim()) return;
-    try { await onCreate(envId, prompt.trim(), model.trim() || undefined); } catch (e) { setErr(e.message); }
+    try { await onCreate(envId, prompt.trim()); } catch (e) { setErr(e.message); }
   };
   return html`
     <div class="modal-bg" onClick=${onClose}>
@@ -244,7 +247,6 @@ function NewSessionModal({ envs, preselect, onClose, onCreate }) {
             ${usable.map((e) => html`<option value=${e.id} key=${e.id}>${e.name} (:${e.port})</option>`)}
           </select>
         </label>
-        <label>Model <input value=${model} placeholder="default (e.g. claude-sonnet-4-6)" onInput=${(e) => setModel(e.target.value)} /></label>
         <label>First message
           <textarea value=${prompt} rows="4" onInput=${(e) => setPrompt(e.target.value)} placeholder="Describe the task…"></textarea>
         </label>
