@@ -76,27 +76,55 @@ function StatusDot({ status }) {
   return html`<span class="dot ${status}" title=${status}></span>`;
 }
 
-function Sidebar({ sessions, envs, selectedId, onSelect, onNew, onSettings }) {
+const TRANSIENT_ENV = ['scaffolding', 'setting-up', 'configuring', 'starting-worker', 'destroying'];
+
+function EnvRow({ env, onAction }) {
+  const building = TRANSIENT_ENV.includes(env.status);
+  const up = env.status === 'running' || env.status === 'degraded';
+  return html`
+    <div class="env">
+      <div class="env-top">
+        <${StatusDot} status=${env.status} /> <span class="env-name">${env.name}</span>
+        <a class="env-port" href=${env.wpUrl} target="_blank" rel="noreferrer" onClick=${(e) => e.stopPropagation()}>:${env.port}</a>
+      </div>
+      <div class="env-actions">
+        ${building
+          ? html`<span class="muted small">${env.status}…</span>`
+          : html`
+            ${up && html`<button class="lnk" onClick=${() => onAction('session', env)}>+ session</button>`}
+            ${up && html`<button class="lnk" onClick=${() => onAction('stop', env)}>stop</button>`}
+            ${env.status === 'stopped' && html`<button class="lnk" onClick=${() => onAction('start', env)}>start</button>`}
+            ${env.status === 'failed' && html`<button class="lnk" onClick=${() => onAction('start', env)}>retry</button>`}
+            <button class="lnk danger" onClick=${() => onAction('delete', env)}>delete</button>`}
+      </div>
+    </div>`;
+}
+
+function Sidebar({ sessions, envs, selectedId, onSelect, onNewSession, onNewEnv, onEnvAction, onSettings }) {
   return html`
     <aside class="sidebar">
       <div class="side-head">
-        <strong>Sessions</strong>
-        <div>
-          <button class="btn small" onClick=${onNew}>+ New</button>
-          <button class="btn small ghost" onClick=${onSettings} title="API token">⚙</button>
+        <strong>Devbox</strong>
+        <button class="btn small ghost" onClick=${onSettings} title="API token">⚙</button>
+      </div>
+      <div class="side-section">
+        <div class="section-head"><span>Environments</span><button class="btn small" onClick=${onNewEnv}>+ Env</button></div>
+        ${envs.length === 0 && html`<div class="muted pad small">No environments — create one.</div>`}
+        ${envs.map((e) => html`<${EnvRow} env=${e} key=${e.id} onAction=${onEnvAction} />`)}
+      </div>
+      <div class="side-section grow">
+        <div class="section-head"><span>Sessions</span><button class="btn small" onClick=${onNewSession}>+ Session</button></div>
+        <div class="side-list">
+          ${sessions.length === 0 && html`<div class="muted pad small">No sessions yet.</div>`}
+          ${sessions.map(
+            (s) => html`
+              <div class=${`sess ${s.id === selectedId ? 'active' : ''}`} key=${s.id} onClick=${() => onSelect(s.id)}>
+                <div class="sess-top"><${StatusDot} status=${s.status} /> <span class="sess-title">${s.title || s.id}</span></div>
+                <div class="sess-sub muted">${s.envName} · ${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
+              </div>`,
+          )}
         </div>
       </div>
-      <div class="side-list">
-        ${sessions.length === 0 && html`<div class="muted pad">No sessions yet.</div>`}
-        ${sessions.map(
-          (s) => html`
-            <div class=${`sess ${s.id === selectedId ? 'active' : ''}`} key=${s.id} onClick=${() => onSelect(s.id)}>
-              <div class="sess-top"><${StatusDot} status=${s.status} /> <span class="sess-title">${s.title || s.id}</span></div>
-              <div class="sess-sub muted">${s.envName} · ${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
-            </div>`,
-        )}
-      </div>
-      <div class="side-foot muted">${envs.length} environment${envs.length === 1 ? '' : 's'}</div>
     </aside>`;
 }
 
@@ -196,9 +224,9 @@ function SessionView({ session, onChanged }) {
     </section>`;
 }
 
-function NewSessionModal({ envs, onClose, onCreate }) {
+function NewSessionModal({ envs, preselect, onClose, onCreate }) {
   const usable = envs.filter((e) => e.status === 'running' || e.status === 'degraded');
-  const [envId, setEnvId] = useState(usable[0] && usable[0].id);
+  const [envId, setEnvId] = useState(preselect || (usable[0] && usable[0].id));
   const [model, setModel] = useState('');
   const [prompt, setPrompt] = useState('');
   const [err, setErr] = useState('');
@@ -229,6 +257,31 @@ function NewSessionModal({ envs, onClose, onCreate }) {
     </div>`;
 }
 
+function NewEnvModal({ onClose, onCreate }) {
+  const [name, setName] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const create = async () => {
+    setBusy(true); setErr('');
+    try { await onCreate(name.trim() || undefined); } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  return html`
+    <div class="modal-bg" onClick=${onClose}>
+      <div class="modal" onClick=${(e) => e.stopPropagation()}>
+        <h3>New environment</h3>
+        <p class="muted">Builds a fresh WordPress devbox (≈1 min) with the target plugin checked out. Leave the name blank to auto-generate.</p>
+        <label>Name (optional)
+          <input value=${name} placeholder="my-devbox (a-z, 0-9, -)" onInput=${(e) => setName(e.target.value)} />
+        </label>
+        ${err && html`<div class="err-msg">${err}</div>`}
+        <div class="modal-foot">
+          <button class="btn ghost" onClick=${onClose}>Cancel</button>
+          <button class="btn" onClick=${create} disabled=${busy}>${busy ? 'Creating…' : 'Create'}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 function TokenGate({ onSave }) {
   const [val, setVal] = useState(token.get());
   return html`
@@ -246,7 +299,8 @@ function App() {
   const [sessions, setSessions] = useState([]);
   const [envs, setEnvs] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
-  const [showNew, setShowNew] = useState(false);
+  const [newSession, setNewSession] = useState(null); // null | { preselect? }
+  const [showNewEnv, setShowNewEnv] = useState(false);
   const [needToken, setNeedToken] = useState(false);
   const [authed, setAuthed] = useState(!!token.get());
 
@@ -262,19 +316,42 @@ function App() {
   if (needToken || !authed) return html`<${TokenGate} onSave=${() => { setAuthed(true); setNeedToken(false); refresh(); }} />`;
 
   const selected = sessions.find((s) => s.id === selectedId);
+
   const createSession = async (envId, prompt, model) => {
     const s = await api(`/environments/${envId}/sessions`, { method: 'POST', body: JSON.stringify({ prompt, model }) });
-    setShowNew(false); await refresh(); setSelectedId(s.id);
+    setNewSession(null); await refresh(); setSelectedId(s.id);
+  };
+  const createEnv = async (name) => {
+    await api('/environments', { method: 'POST', body: JSON.stringify({ name }) });
+    setShowNewEnv(false); refresh();
+  };
+  const envAction = async (action, env) => {
+    try {
+      if (action === 'session') return setNewSession({ preselect: env.id });
+      if (action === 'start') await api(`/environments/${env.id}/start`, { method: 'POST' });
+      if (action === 'stop') await api(`/environments/${env.id}/stop`, { method: 'POST' });
+      if (action === 'delete') {
+        if (!confirm(`Destroy environment "${env.name}"? This removes its containers and all its data.`)) return;
+        await api(`/environments/${env.id}`, { method: 'DELETE' });
+      }
+      refresh();
+    } catch (e) { alert(`${action} failed: ${e.message}`); }
   };
 
   return html`
     <div class="layout">
       <${Sidebar} sessions=${sessions} envs=${envs} selectedId=${selectedId}
-        onSelect=${setSelectedId} onNew=${() => setShowNew(true)} onSettings=${() => setAuthed(false)} />
+        onSelect=${setSelectedId} onNewSession=${() => setNewSession({})} onNewEnv=${() => setShowNewEnv(true)}
+        onEnvAction=${envAction} onSettings=${() => setAuthed(false)} />
       ${selected
         ? html`<${SessionView} session=${selected} key=${selected.id} onChanged=${refresh} />`
-        : html`<section class="main empty"><div class="muted">Select a session, or <button class="btn" onClick=${() => setShowNew(true)}>start a new one</button>.</div></section>`}
-      ${showNew && html`<${NewSessionModal} envs=${envs} onClose=${() => setShowNew(false)} onCreate=${createSession} />`}
+        : html`<section class="main empty"><div class="muted">
+            ${envs.length === 0
+              ? html`No environments yet. <button class="btn" onClick=${() => setShowNewEnv(true)}>Create an environment</button> to begin.`
+              : html`Select a session, or <button class="btn" onClick=${() => setNewSession({})}>start a new one</button>.`}
+          </div></section>`}
+      ${newSession && html`<${NewSessionModal} envs=${envs} preselect=${newSession.preselect} onClose=${() => setNewSession(null)} onCreate=${createSession} />`}
+      ${showNewEnv && html`<${NewEnvModal} onClose=${() => setShowNewEnv(false)} onCreate=${createEnv} />`}
     </div>`;
 }
 

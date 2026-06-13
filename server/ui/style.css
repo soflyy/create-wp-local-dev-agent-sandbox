@@ -17,7 +17,21 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .sidebar { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .side-head { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid var(--line); }
 .side-list { overflow-y: auto; flex: 1; }
-.side-foot { padding: 8px 12px; border-top: 1px solid var(--line); font-size: 12px; }
+.side-section { border-bottom: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.side-section.grow { flex: 1; }
+.side-section.grow .side-list { max-height: none; }
+.section-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.small { font-size: 12px; }
+
+/* environment rows */
+.env { padding: 7px 12px; border-top: 1px solid var(--line); }
+.env-top { display: flex; align-items: center; gap: 7px; }
+.env-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.env-port { margin-left: auto; color: var(--accent); font-size: 12px; text-decoration: none; }
+.env-actions { display: flex; gap: 10px; margin-top: 3px; padding-left: 16px; }
+.lnk { background: none; border: 0; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0; }
+.lnk:hover { text-decoration: underline; }
+.lnk.danger { color: var(--red); margin-left: auto; }
 .sess { padding: 10px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .sess:hover { background: var(--panel2); }
 .sess.active { background: var(--accent2); }
