@@ -11,7 +11,7 @@ import { allocate } from './allocator.js';
 import * as docker from './docker.js';
 import * as workerMod from './worker.js';
 import * as gitauth from './gitauth.js';
-import * as targetrepo from './targetrepo.js';
+import * as agentConnector from './agent-connector.js';
 import * as fleet from './fleet.js';
 import { computeStatus, coreUp, publicView } from './status.js';
 import { log, redact } from './log.js';
@@ -80,7 +80,7 @@ export class Manager {
       this.jobs.set(record.id, 'configuring');
       await registry.update(record.id, { status: 'configuring' });
       await gitauth.configure(record, config);
-      await targetrepo.setup(record, config);
+      await agentConnector.setup(record, config);
 
       // 3. Optionally start the named Cursor worker.
       if (config.cursorWorkerAutostart) {

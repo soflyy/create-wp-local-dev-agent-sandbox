@@ -1,5 +1,6 @@
-// Replace the release-zip plugin with a live git checkout of the target repo,
-// so the Cursor worker operates on (and commits to) the real repository.
+// Agent Connector for WP integration: replace the release-zip plugin with a live
+// git checkout of the repo (TARGET_REPO, default soflyy/agent-connector-for-wp),
+// so the agent operates on — and commits to — the real repository.
 //
 // Mirrors the repo's own documented local-dev flow:
 //   clone <repo> → (cd <subdir> && composer install --no-dev) →
