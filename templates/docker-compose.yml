@@ -7,7 +7,12 @@ services:
       - ./db:/var/lib/mysql
 
   wordpress:
-    image: wordpress:latest
+    # Built from the stock wordpress image + a uid-1000 user so Apache can drop
+    # privileges to APACHE_RUN_USER=#1000 (see wordpress.Dockerfile) — keeps
+    # PHP-written files owned by 1000, editable from the workspace.
+    build:
+      context: .
+      dockerfile: wordpress.Dockerfile
     restart: unless-stopped
     depends_on:
       - db
