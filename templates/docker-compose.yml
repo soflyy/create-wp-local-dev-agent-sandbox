@@ -37,6 +37,13 @@ services:
             define( 'WP_HOME', $$scheme . '://' . $$_SERVER['HTTP_HOST'] );
             define( 'WP_SITEURL', $$scheme . '://' . $$_SERVER['HTTP_HOST'] );
         }
+        // Use direct PHP filesystem access — no FTP-credentials prompt. WordPress
+        // otherwise guesses the method by comparing file ownership against the web
+        // server's uid; in this sandbox that heuristic can pick a non-'direct'
+        // method, so WP_Filesystem fails to init and plugins that read/write files
+        // through it (e.g. a fonts.json reader) fatal. Safe here: throwaway local
+        // sandbox, and the web container can read/write the bind-mounted tree.
+        define( 'FS_METHOD', 'direct' );
     ports:
       - "${WP_PORT}:80"
     volumes:
