@@ -49,6 +49,10 @@ function reduce(items, partialRef, evt) {
       }
       break;
     }
+    case 'user_prompt':
+      // the message the user sent — claude -p doesn't echo it, so the server records it
+      push({ kind: 'user', text: evt.text });
+      break;
     case 'user': {
       const content = (evt.message && evt.message.content) || [];
       for (const b of content) {
@@ -133,6 +137,7 @@ function Sidebar({ sessions, envs, selectedId, onSelect, onNewSession, onNewEnv,
 }
 
 function Bubble({ it }) {
+  if (it.kind === 'user') return html`<div class="bubble user"><pre>${it.text}</pre></div>`;
   if (it.kind === 'assistant') return html`<div class="bubble assistant"><pre>${it.text}</pre></div>`;
   if (it.kind === 'system') return html`<div class="chip">${it.text}</div>`;
   if (it.kind === 'control') return html`<div class="divider">${it.text}</div>`;
