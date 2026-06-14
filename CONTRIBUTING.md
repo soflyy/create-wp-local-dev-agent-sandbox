@@ -28,6 +28,7 @@ ls /tmp/try-it
 cd /tmp/try-it
 npm run setup            # up -d --build, then installs WordPress + plugins
 #   → open http://localhost:8090 and log in at /wp-admin with admin / password
+#     (default; configurable via WP_ADMIN_USER / WP_ADMIN_PASSWORD in .env)
 #   (after the first run, `npm run start` is all you need)
 
 # 4. Get into the workspace container to test it (lands you in /wp)

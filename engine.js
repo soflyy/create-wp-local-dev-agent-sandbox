@@ -10,6 +10,7 @@
 import { readdir, mkdir, readFile, writeFile, chown } from 'node:fs/promises';
 import { dirname, join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -57,6 +58,26 @@ Options:
 `);
 }
 
+// User-level config — defaults applied to EVERY scaffold (set once, like
+// ~/.claude). Location: $XDG_CONFIG_HOME/create-wp-local-dev-agent-sandbox/
+// config.json (default ~/.config/…). Keys: wpAdminUser, wpAdminPassword,
+// wpAdminEmail. Missing/invalid file → {} (falls back to admin / password).
+// The devbox server runs as root, so root's config seeds all its envs too.
+export const USER_CONFIG_PATH = join(
+  process.env.XDG_CONFIG_HOME || join(homedir(), '.config'),
+  'create-wp-local-dev-agent-sandbox',
+  'config.json',
+);
+
+async function loadUserConfig() {
+  try {
+    const c = JSON.parse(await readFile(USER_CONFIG_PATH, 'utf8'));
+    return c && typeof c === 'object' ? c : {};
+  } catch {
+    return {};
+  }
+}
+
 async function copyTemplates(srcDir, destDir, vars) {
   for (const entry of await readdir(srcDir, { withFileTypes: true })) {
     const src = join(srcDir, entry.name);
@@ -67,7 +88,10 @@ async function copyTemplates(srcDir, destDir, vars) {
     } else {
       const rendered = (await readFile(src, 'utf8'))
         .replaceAll('__PROJECT_NAME__', vars.projectName)
-        .replaceAll('__WP_PORT__', vars.port);
+        .replaceAll('__WP_PORT__', vars.port)
+        .replaceAll('__WP_ADMIN_USER__', vars.wpAdminUser)
+        .replaceAll('__WP_ADMIN_PASSWORD__', vars.wpAdminPassword)
+        .replaceAll('__WP_ADMIN_EMAIL__', vars.wpAdminEmail);
       await mkdir(dirname(dest), { recursive: true });
       await writeFile(dest, rendered);
     }
@@ -122,7 +146,15 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
     process.exit(1);
   }
 
-  await copyTemplates(TEMPLATES, targetDir, { projectName, port: String(args.port) });
+  // User-level defaults (set once in ~/.config/...); fall back to admin/password.
+  const userConfig = await loadUserConfig();
+  await copyTemplates(TEMPLATES, targetDir, {
+    projectName,
+    port: String(args.port),
+    wpAdminUser: userConfig.wpAdminUser || 'admin',
+    wpAdminPassword: userConfig.wpAdminPassword || 'password',
+    wpAdminEmail: userConfig.wpAdminEmail || 'admin@example.com',
+  });
   await applyPreset(targetDir, preset);
 
   // Pre-create the bind-mount host dirs (see docker-compose.yml). If they don't
@@ -158,7 +190,7 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
     console.log('  npm run claude       # launch Claude Code in the workspace');
     console.log('  npm run cursor       # launch the Cursor CLI agent in the workspace');
     console.log('');
-    console.log(`Once setup finishes, your site is at http://localhost:${args.port} — log in at /wp-admin with admin / password.`);
+    console.log(`Once setup finishes, your site is at http://localhost:${args.port} — log in at /wp-admin with admin / password (default; set WP_ADMIN_USER / WP_ADMIN_PASSWORD in .env to change).`);
     return;
   }
 

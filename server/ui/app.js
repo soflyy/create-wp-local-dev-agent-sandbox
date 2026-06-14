@@ -49,6 +49,10 @@ function reduce(items, partialRef, evt) {
       }
       break;
     }
+    case 'user_prompt':
+      // the message the user sent — claude -p doesn't echo it, so the server records it
+      push({ kind: 'user', text: evt.text });
+      break;
     case 'user': {
       const content = (evt.message && evt.message.content) || [];
       for (const b of content) {
@@ -81,11 +85,15 @@ const TRANSIENT_ENV = ['scaffolding', 'setting-up', 'configuring', 'starting-wor
 function EnvRow({ env, onAction }) {
   const building = TRANSIENT_ENV.includes(env.status);
   const up = env.status === 'running' || env.status === 'degraded';
+  // Link to the WP site on the SAME host the UI was loaded from (not the
+  // server's localhost wpUrl) — so it works from a phone/laptop hitting the
+  // server's IP, and still works from inside the devbox via localhost.
+  const wpUrl = `${location.protocol}//${location.hostname}:${env.port}/`;
   return html`
     <div class="env">
       <div class="env-top">
         <${StatusDot} status=${env.status} /> <span class="env-name">${env.name}</span>
-        <a class="env-port" href=${env.wpUrl} target="_blank" rel="noreferrer" onClick=${(e) => e.stopPropagation()}>:${env.port}</a>
+        <a class="env-port" href=${wpUrl} target="_blank" rel="noreferrer" onClick=${(e) => e.stopPropagation()}>:${env.port}</a>
       </div>
       <div class="env-actions">
         ${building
@@ -129,6 +137,7 @@ function Sidebar({ sessions, envs, selectedId, onSelect, onNewSession, onNewEnv,
 }
 
 function Bubble({ it }) {
+  if (it.kind === 'user') return html`<div class="bubble user"><pre>${it.text}</pre></div>`;
   if (it.kind === 'assistant') return html`<div class="bubble assistant"><pre>${it.text}</pre></div>`;
   if (it.kind === 'system') return html`<div class="chip">${it.text}</div>`;
   if (it.kind === 'control') return html`<div class="divider">${it.text}</div>`;
@@ -144,7 +153,7 @@ function Bubble({ it }) {
   return html`<div class="raw"><pre>${it.text}</pre></div>`;
 }
 
-function SessionView({ session, onChanged }) {
+function SessionView({ session, onChanged, onBack }) {
   const [items, setItems] = useState([]);
   const [partial, setPartial] = useState('');
   const [busy, setBusy] = useState(false);
@@ -197,7 +206,10 @@ function SessionView({ session, onChanged }) {
   return html`
     <section class="main">
       <header class="bar">
-        <div><${StatusDot} status=${session.status} /> <strong>${session.title || id}</strong></div>
+        <div class="bar-title">
+          <button class="back btn small ghost" onClick=${onBack} title="Back to list">‹</button>
+          <${StatusDot} status=${session.status} /> <strong>${session.title || id}</strong>
+        </div>
         <div class="bar-meta muted">
           ${session.envName} · ${session.model || 'default model'} · $${(session.costUsd || 0).toFixed(4)}
           ${session.claudeSessionId && html`· <code title="claude session id">${session.claudeSessionId.slice(0, 8)}</code>`}
@@ -227,12 +239,11 @@ function SessionView({ session, onChanged }) {
 function NewSessionModal({ envs, preselect, onClose, onCreate }) {
   const usable = envs.filter((e) => e.status === 'running' || e.status === 'degraded');
   const [envId, setEnvId] = useState(preselect || (usable[0] && usable[0].id));
-  const [model, setModel] = useState('');
   const [prompt, setPrompt] = useState('');
   const [err, setErr] = useState('');
   const create = async () => {
     if (!envId || !prompt.trim()) return;
-    try { await onCreate(envId, prompt.trim(), model.trim() || undefined); } catch (e) { setErr(e.message); }
+    try { await onCreate(envId, prompt.trim()); } catch (e) { setErr(e.message); }
   };
   return html`
     <div class="modal-bg" onClick=${onClose}>
@@ -244,7 +255,6 @@ function NewSessionModal({ envs, preselect, onClose, onCreate }) {
             ${usable.map((e) => html`<option value=${e.id} key=${e.id}>${e.name} (:${e.port})</option>`)}
           </select>
         </label>
-        <label>Model <input value=${model} placeholder="default (e.g. claude-sonnet-4-6)" onInput=${(e) => setModel(e.target.value)} /></label>
         <label>First message
           <textarea value=${prompt} rows="4" onInput=${(e) => setPrompt(e.target.value)} placeholder="Describe the task…"></textarea>
         </label>
@@ -339,12 +349,12 @@ function App() {
   };
 
   return html`
-    <div class="layout">
+    <div class=${`layout ${selected ? 'has-selection' : ''}`}>
       <${Sidebar} sessions=${sessions} envs=${envs} selectedId=${selectedId}
         onSelect=${setSelectedId} onNewSession=${() => setNewSession({})} onNewEnv=${() => setShowNewEnv(true)}
         onEnvAction=${envAction} onSettings=${() => setAuthed(false)} />
       ${selected
-        ? html`<${SessionView} session=${selected} key=${selected.id} onChanged=${refresh} />`
+        ? html`<${SessionView} session=${selected} key=${selected.id} onChanged=${refresh} onBack=${() => setSelectedId(null)} />`
         : html`<section class="main empty"><div class="muted">
             ${envs.length === 0
               ? html`No environments yet. <button class="btn" onClick=${() => setShowNewEnv(true)}>Create an environment</button> to begin.`

@@ -11,7 +11,7 @@
 
 import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { log, redact } from './log.js';
 
@@ -75,6 +75,14 @@ export class ClaudeEngine {
     const ndjson = createWriteStream(session.eventLogPath, { flags: 'a' });
     ndjson.on('error', (e) => log.warn(`[${session.id}] event log write error:`, e.message));
     ndjson.write(`${JSON.stringify({ type: 'control', subtype: 'turn-start', at: new Date().toISOString() })}\n`);
+
+    // `claude -p` doesn't echo the prompt in its output (it's argv), so record it
+    // ourselves — to the ndjson (shows on transcript reload) and the live bus —
+    // otherwise the UI only ever shows Claude's side, never the user's message.
+    // uuid lets the UI dedupe the transcript-replay vs the SSE backlog copy.
+    const promptEvt = { type: 'user_prompt', text: prompt, uuid: randomUUID() };
+    ndjson.write(JSON.stringify(promptEvt) + '\n');
+    this.bus.publish(session.id, promptEvt);
 
     // stdin ignored → in-workspace.sh sees a non-TTY → adds -T → clean stream-json.
     const child = spawn('bash', args, { cwd: env.dir, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });

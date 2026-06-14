@@ -22,6 +22,11 @@ set -euo pipefail
 # This script lives in scripts/ — operate from the project root.
 cd "$(dirname "$0")/.."
 
+# The admin user the MCP application password is minted for — must match the
+# account install-wp.sh created (overridable via .env; defaults to admin).
+if [ -f .env ]; then set -a; . ./.env; set +a; fi
+WP_ADMIN_USER="${WP_ADMIN_USER:-admin}"
+
 # Is the WordPress MCP server available? (Agent Connector active.)
 HAS_WP=0
 if docker compose exec -T workspace wp plugin is-active agent-connector-for-wp >/dev/null 2>&1; then
@@ -30,26 +35,27 @@ else
   echo "→ agent-connector-for-wp plugin not active — skipping the WordPress MCP server (both agents)."
 fi
 
-# All registration happens in-container. HAS_WP is passed as $1 (to sh -s); the
-# app password is minted and used here, never surfacing on the host.
-docker compose exec -T workspace sh -s "$HAS_WP" <<'EOF'
+# All registration happens in-container. HAS_WP is $1, the admin user is $2 (to
+# sh -s); the app password is minted and used here, never surfacing on the host.
+docker compose exec -T workspace sh -s "$HAS_WP" "$WP_ADMIN_USER" <<'EOF'
 set -e
 HAS_WP="$1"
+ADMIN_USER="$2"
 WP_MCP_URL="http://wordpress/wp-json/mcp/mcp-adapter-default-server"
 PLAYWRIGHT_URL="http://playwright:8931/mcp"
 APPPASS=""
 
 if [ "$HAS_WP" = "1" ]; then
-  # Reset admin's app passwords (the sandbox only uses them for this) and mint a
-  # fresh one — the plaintext is only available at creation time.
-  wp user application-password delete admin --all >/dev/null 2>&1 || true
-  APPPASS=$(wp user application-password create admin "agent-sandbox" --porcelain)
+  # Reset the admin user's app passwords (the sandbox only uses them for this)
+  # and mint a fresh one — the plaintext is only available at creation time.
+  wp user application-password delete "$ADMIN_USER" --all >/dev/null 2>&1 || true
+  APPPASS=$(wp user application-password create "$ADMIN_USER" "agent-sandbox" --porcelain)
 
   echo "→ Connecting Claude to the WordPress MCP server (mcp-wordpress-remote proxy)…"
   claude mcp remove wordpress --scope user >/dev/null 2>&1 || true
   claude mcp add wordpress --scope user \
     --env WP_API_URL="$WP_MCP_URL" \
-    --env WP_API_USERNAME=admin \
+    --env WP_API_USERNAME="$ADMIN_USER" \
     --env WP_API_PASSWORD="$APPPASS" \
     --env OAUTH_ENABLED=false \
     -- npx -y @automattic/mcp-wordpress-remote
@@ -66,7 +72,7 @@ claude mcp add playwright --scope user --transport http "$PLAYWRIGHT_URL"
 # scaffolding as a non-1000 host user), warn and continue rather than aborting
 # setup — Claude registration above is independent.
 echo "→ Connecting Cursor to the MCP servers (~/.cursor/mcp.json)…"
-if HAS_WP="$HAS_WP" APPPASS="$APPPASS" WP_MCP_URL="$WP_MCP_URL" PLAYWRIGHT_URL="$PLAYWRIGHT_URL" node -e '
+if HAS_WP="$HAS_WP" APPPASS="$APPPASS" WP_API_USERNAME="$ADMIN_USER" WP_MCP_URL="$WP_MCP_URL" PLAYWRIGHT_URL="$PLAYWRIGHT_URL" node -e '
   const fs = require("fs"), os = require("os"), path = require("path");
   const dir = path.join(os.homedir(), ".cursor");
   fs.mkdirSync(dir, { recursive: true });
@@ -80,7 +86,7 @@ if HAS_WP="$HAS_WP" APPPASS="$APPPASS" WP_MCP_URL="$WP_MCP_URL" PLAYWRIGHT_URL="
       args: ["-y", "@automattic/mcp-wordpress-remote"],
       env: {
         WP_API_URL: process.env.WP_MCP_URL,
-        WP_API_USERNAME: "admin",
+        WP_API_USERNAME: process.env.WP_API_USERNAME,
         WP_API_PASSWORD: process.env.APPPASS,
         OAUTH_ENABLED: "false",
       },
