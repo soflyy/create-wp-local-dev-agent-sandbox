@@ -14,6 +14,10 @@ if [ -f .env ]; then
   set -a; . ./.env; set +a
 fi
 WP_PORT="${WP_PORT:-8080}"
+# Admin account — overridable from .env; defaults to admin / password.
+WP_ADMIN_USER="${WP_ADMIN_USER:-admin}"
+WP_ADMIN_PASSWORD="${WP_ADMIN_PASSWORD:-password}"
+WP_ADMIN_EMAIL="${WP_ADMIN_EMAIL:-admin@example.com}"
 
 if docker compose exec -T workspace wp core is-installed >/dev/null 2>&1; then
   echo "✓ WordPress is already installed — nothing to do."
@@ -22,14 +26,14 @@ else
   docker compose exec -T workspace wp core install \
     --url="http://localhost:${WP_PORT}" \
     --title="WordPress Dev" \
-    --admin_user="admin" \
-    --admin_password="password" \
-    --admin_email="admin@example.com" \
+    --admin_user="${WP_ADMIN_USER}" \
+    --admin_password="${WP_ADMIN_PASSWORD}" \
+    --admin_email="${WP_ADMIN_EMAIL}" \
     --skip-email
   cat <<EOF
 ✓ WordPress installed.
     Site:     http://localhost:${WP_PORT}
-    Admin:    http://localhost:${WP_PORT}/wp-admin/  (admin / password)
+    Admin:    http://localhost:${WP_PORT}/wp-admin/  (${WP_ADMIN_USER} / ${WP_ADMIN_PASSWORD})
 EOF
 fi
 

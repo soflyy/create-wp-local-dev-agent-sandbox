@@ -26,10 +26,12 @@ npm run setup     # build, start, and install WordPress
 
 `npm run setup` brings the stack up, installs WordPress, and installs/activates the plugins listed in [`sandbox.config.json`](#plugins-sandboxconfigjson). It's idempotent — safe to re-run.
 
-Then open **http://localhost:__WP_PORT__**. WordPress is already installed — log in at **/wp-admin** with:
+Then open **http://localhost:__WP_PORT__**. WordPress is already installed — log in at **/wp-admin** with the admin account from `.env`:
 
-- **Username:** `admin`
-- **Password:** `password`
+- **Username:** `admin` (`WP_ADMIN_USER`)
+- **Password:** `password` (`WP_ADMIN_PASSWORD`)
+
+Change `WP_ADMIN_USER` / `WP_ADMIN_PASSWORD` in `.env` before `npm run setup` to use your own.
 
 Day to day, just bring the containers up:
 
@@ -39,7 +41,7 @@ npm run start     # build + start containers
 
 | Script | What it does |
 | --- | --- |
-| `npm run setup` | First-run: start the stack, install WordPress (`admin` / `password`), install plugins |
+| `npm run setup` | First-run: start the stack, install WordPress (admin account from `.env`, default `admin` / `password`), install plugins |
 | `npm run start` | `docker compose up -d --build` |
 | `npm run stop` | Stop containers (keep data) |
 | `npm run down` | Stop + remove containers (data preserved in `db/`, `workspace/`) |

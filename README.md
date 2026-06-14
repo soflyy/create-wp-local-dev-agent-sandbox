@@ -20,7 +20,7 @@ npx create-wp-local-dev-agent-sandbox my-site --port=8090
 npx create-wp-local-dev-agent-sandbox my-site --scaffold-only
 ```
 
-Docker must be running. When it finishes you have a live site at **http://localhost:8080** — log in at `/wp-admin` with `admin` / `password`. Then:
+Docker must be running. When it finishes you have a live site at **http://localhost:8080** — log in at `/wp-admin` with `admin` / `password` (the default; configurable in `.env` via `WP_ADMIN_USER` / `WP_ADMIN_PASSWORD`). Then:
 
 ```bash
 cd my-site
@@ -57,6 +57,20 @@ WordPress data, the database, and the workspace home are bind-mounted into `wp/`
 
 - Node.js >= 18 (to run the CLI and the project's npm scripts)
 - Docker with Compose v2 (to actually run the environment)
+
+## User config (defaults for every sandbox)
+
+Set defaults once and they apply to every project you scaffold (and every environment the devbox server creates) — at `~/.config/create-wp-local-dev-agent-sandbox/config.json` (or `$XDG_CONFIG_HOME/...`):
+
+```json
+{
+  "wpAdminUser": "admin",
+  "wpAdminPassword": "change-me",
+  "wpAdminEmail": "you@example.com"
+}
+```
+
+At scaffold time these seed the new project's `.env` (`WP_ADMIN_USER` / `WP_ADMIN_PASSWORD` / `WP_ADMIN_EMAIL`); with no config file they fall back to `admin` / `password`. To override for a single project, edit that project's `.env` and `npm run reset`. (Keep the password free of shell metacharacters, or quote it in `.env` — the setup scripts source `.env`.)
 
 ## Build your own `npm create` command
 
