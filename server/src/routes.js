@@ -1,7 +1,7 @@
 // Endpoint handlers — thin: validate input, call the manager/session engine,
 // shape the response. `sessions` bundles { store, engine, bus }.
 
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { route } from './http.js';
 import { hostInfo } from './docker.js';
 import { AllocationError } from './allocator.js';
@@ -23,6 +23,14 @@ export function buildRoutes(config, registry, manager, sessions, presets) {
   };
   const assertUsable = async (env) => {
     if (!(await manager.usable(env))) throw httpErr(409, `environment "${env.name}" is not running`);
+  };
+  // Fully remove a session: stop any active turn, drop its event stream + log
+  // file, and delete the record. Used by DELETE /sessions/:id and env destroy.
+  const deleteSession = async (s) => {
+    sessions.engine.interrupt(s.id);
+    sessions.bus.clear(s.id);
+    await sessions.store.remove(s.id);
+    if (s.eventLogPath) await rm(s.eventLogPath, { force: true }).catch(() => {});
   };
   const sshHint = (s) => {
     const env = registry.get(s.envId);
@@ -83,8 +91,9 @@ export function buildRoutes(config, registry, manager, sessions, presets) {
     route('POST', '/environments/:id/start', async (ctx) => ctx.send(200, await manager.start(envOr404(ctx)))),
     route('DELETE', '/environments/:id', async (ctx) => {
       const env = envOr404(ctx);
+      // Sessions are tied to their environment: destroying it deletes them all.
       sessions.engine.killEnvSessions(env.id);
-      for (const s of sessions.store.listByEnv(env.id)) await sessions.store.update(s.id, { status: 'env-destroyed' });
+      for (const s of sessions.store.listByEnv(env.id)) await deleteSession(s);
       await manager.destroy(env);
       ctx.send(200, { deleted: true });
     }),
@@ -138,6 +147,14 @@ export function buildRoutes(config, registry, manager, sessions, presets) {
 
     route('GET', '/sessions/:id', async (ctx) => ctx.send(200, publicSession(sessionOr404(ctx)))),
 
+    route('PATCH', '/sessions/:id', async (ctx) => {
+      const s = sessionOr404(ctx);
+      const title = String(ctx.body.title || '').replace(/\s+/g, ' ').trim();
+      if (!title) throw httpErr(400, 'title is required');
+      const updated = await sessions.store.update(s.id, { title: title.slice(0, 200) });
+      ctx.send(200, publicSession(updated));
+    }),
+
     route('GET', '/sessions/:id/transcript', async (ctx) => {
       const s = sessionOr404(ctx);
       const tail = Math.min(parseInt(ctx.query.get('tail') || '2000', 10) || 2000, 20000);
@@ -167,10 +184,7 @@ export function buildRoutes(config, registry, manager, sessions, presets) {
     }),
 
     route('DELETE', '/sessions/:id', async (ctx) => {
-      const s = sessionOr404(ctx);
-      sessions.engine.interrupt(s.id);
-      sessions.bus.clear(s.id);
-      await sessions.store.remove(s.id);
+      await deleteSession(sessionOr404(ctx));
       ctx.send(200, { deleted: true });
     }),
 

@@ -111,29 +111,36 @@ function EnvRow({ env, onAction }) {
     </div>`;
 }
 
-function Sidebar({ sessions, envs, selectedId, onSelect, onNewSession, onNewEnv, onEnvAction, onSettings }) {
+function SessionItem({ s, selectedId, onSelect }) {
+  return html`
+    <div class=${`sess ${s.id === selectedId ? 'active' : ''}`} onClick=${() => onSelect(s.id)}>
+      <div class="sess-top"><${StatusDot} status=${s.status} /> <span class="sess-title">${s.title || s.id}</span></div>
+      <div class="sess-sub muted">${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
+    </div>`;
+}
+
+function Sidebar({ sessions, envs, selectedId, onSelect, onNewEnv, onEnvAction, onSettings }) {
   return html`
     <aside class="sidebar">
       <div class="side-head">
         <strong>Devbox</strong>
         <button class="btn small ghost" onClick=${onSettings} title="API token">⚙</button>
       </div>
-      <div class="side-section">
-        <div class="section-head"><span>Environments</span><button class="btn small" onClick=${onNewEnv}>+ Env</button></div>
-        ${envs.length === 0 && html`<div class="muted pad small">No environments — create one.</div>`}
-        ${envs.map((e) => html`<${EnvRow} env=${e} key=${e.id} onAction=${onEnvAction} />`)}
-      </div>
       <div class="side-section grow">
-        <div class="section-head"><span>Sessions</span><button class="btn small" onClick=${onNewSession}>+ Session</button></div>
+        <div class="section-head"><span>Environments</span><button class="btn small" onClick=${onNewEnv}>+ Env</button></div>
         <div class="side-list">
-          ${sessions.length === 0 && html`<div class="muted pad small">No sessions yet.</div>`}
-          ${sessions.map(
-            (s) => html`
-              <div class=${`sess ${s.id === selectedId ? 'active' : ''}`} key=${s.id} onClick=${() => onSelect(s.id)}>
-                <div class="sess-top"><${StatusDot} status=${s.status} /> <span class="sess-title">${s.title || s.id}</span></div>
-                <div class="sess-sub muted">${s.envName} · ${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
-              </div>`,
-          )}
+          ${envs.length === 0 && html`<div class="muted pad small">No environments — create one.</div>`}
+          ${envs.map((e) => {
+            const envSessions = sessions.filter((s) => s.envId === e.id);
+            return html`
+              <div class="env-group" key=${e.id}>
+                <${EnvRow} env=${e} onAction=${onEnvAction} />
+                <div class="env-sessions">
+                  ${envSessions.length === 0 && html`<div class="muted pad small no-sess">No sessions yet.</div>`}
+                  ${envSessions.map((s) => html`<${SessionItem} s=${s} key=${s.id} selectedId=${selectedId} onSelect=${onSelect} />`)}
+                </div>
+              </div>`;
+          })}
         </div>
       </div>
     </aside>`;
@@ -161,6 +168,8 @@ function SessionView({ session, onChanged, onBack }) {
   const [partial, setPartial] = useState('');
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
   const partialRef = useRef({ text: '' });
   const seen = useRef(new Set());
   const scroller = useRef(null);
@@ -205,13 +214,29 @@ function SessionView({ session, onChanged, onBack }) {
     catch (e) { setBusy(false); alert(`Send failed: ${e.message}`); }
   }, [input, running, id]);
   const interrupt = async () => { try { await api(`/sessions/${id}/interrupt`, { method: 'POST' }); } catch (e) { alert(e.message); } };
+  const startEdit = () => { setDraft(session.title || ''); setEditing(true); };
+  const saveTitle = async () => {
+    const t = draft.replace(/\s+/g, ' ').trim();
+    setEditing(false);
+    if (!t || t === session.title) return;
+    try { await api(`/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title: t }) }); onChanged && onChanged(); }
+    catch (e) { alert(`Rename failed: ${e.message}`); }
+  };
 
   return html`
     <section class="main">
       <header class="bar">
         <div class="bar-title">
           <button class="back btn small ghost" onClick=${onBack} title="Back to list">‹</button>
-          <${StatusDot} status=${session.status} /> <strong>${session.title || id}</strong>
+          <${StatusDot} status=${session.status} />
+          ${editing
+            ? html`<input class="rename" value=${draft}
+                ref=${(el) => { if (el && document.activeElement !== el) { el.focus(); el.select(); } }}
+                onInput=${(e) => setDraft(e.target.value)}
+                onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); saveTitle(); } else if (e.key === 'Escape') setEditing(false); }}
+                onBlur=${saveTitle} />`
+            : html`<strong title="Double-click to rename" onDblClick=${startEdit}>${session.title || id}</strong>
+                <button class="lnk small" onClick=${startEdit} title="Rename">✎</button>`}
         </div>
         <div class="bar-meta muted">
           ${session.envName} · ${session.model || 'default model'} · $${(session.costUsd || 0).toFixed(4)}
@@ -505,7 +530,7 @@ function App() {
   return html`
     <div class=${`layout ${selected ? 'has-selection' : ''}`}>
       <${Sidebar} sessions=${sessions} envs=${envs} selectedId=${selectedId}
-        onSelect=${setSelectedId} onNewSession=${() => setNewSession({})} onNewEnv=${() => setShowNewEnv(true)}
+        onSelect=${setSelectedId} onNewEnv=${() => setShowNewEnv(true)}
         onEnvAction=${envAction} onSettings=${() => setAuthed(false)} />
       ${selected
         ? html`<${SessionView} session=${selected} key=${selected.id} onChanged=${refresh} onBack=${() => setSelectedId(null)} />`
