@@ -49,11 +49,12 @@ npm run cursor     # launch the Cursor CLI agent in the workspace
 ```
 my-site/
 ├── docker-compose.yml      # db + wordpress + workspace + playwright services
+├── docker-compose.override.yml  # only if a dev script was set — adds the long-running `dev` service
 ├── workspace.Dockerfile    # Node + Claude Code + Cursor CLI + PHP + WP-CLI (runs as non-root)
 ├── .env                    # DB creds + WP_PORT
 ├── .gitignore              # ignores the bind-mounted data dirs
 ├── package.json            # the npm-scripts UX (setup/start/stop/bash/claude/cursor/wp/reset)
-├── sandbox.config.json     # plugins to install, wp-config defines, setup script & activation order for `npm run setup`
+├── sandbox.config.json     # plugins to install, wp-config defines, setup/dev scripts & activation order for `npm run setup`
 ├── php/php.ini             # custom PHP overrides for the wordpress container (upload limits, etc.)
 ├── scripts/                # provisioning steps run by initial-setup.sh (install-wp, defines, user setup script, plugins, agent-connector, mcp, skills) + in-workspace.sh (credential-resolving launcher for bash/claude/cursor)
 ├── bin/                    # cursor-wp-mcp-helper — Node CLI for the WordPress MCP server, baked onto the workspace PATH
@@ -65,19 +66,22 @@ WordPress data, the database, and the workspace home are bind-mounted into `wp/`
 
 ## Customizing setup
 
-Beyond the bundled plugins, you can run your own setup script, add `wp-config.php` constants, and activate plugins in a chosen order. All three are flags on the create command and are persisted into the project's `sandbox.config.json`, so they re-run on `npm run setup` (and `npm run reset`) — the project stays self-contained.
+Beyond the bundled plugins, you can run a one-time setup script, add `wp-config.php` constants, activate plugins in a chosen order, and keep a long-running dev script (a watcher, say) alive alongside the stack. These are flags on the create command, persisted into the project's `sandbox.config.json` (and, for the dev service, a generated `docker-compose.override.yml`), so they re-apply on `npm run setup` / `npm run reset` — the project stays self-contained.
 
 ```bash
 npx create-wp-local-dev-agent-sandbox my-site \
   --port=8090 \
   --setup-script=./setup.sh \
+  --dev-script=./dev.sh \
   --defines=./defines.json \
   --activate=oxygen-elements,breakdance-elements,breakdance-main
 ```
 
-On the first `npm run setup` these run **in order**: install WordPress → apply `--defines` → run `--setup-script` → install bundled `plugins` and activate the `--activate` list. So a plugin your script drops into `wp-content` exists by the time it's activated.
+On the first `npm run setup` the **one-time** steps run in order: install WordPress → apply `--defines` → run `--setup-script` → install bundled `plugins` and activate the `--activate` list. So a plugin your script drops into `wp-content` exists by the time it's activated. The `--dev-script` runs separately and continuously (see below).
 
 - **`--setup-script=PATH`** — a shell script run **inside the workspace container as `node`** — the same environment `npm run bash` gives you, with the working directory at `/home/node` and WordPress at `/home/node/wp`. Use it to clone a repo and run its installer, build a plugin/theme, seed content, etc. It's piped in over stdin, so `gh repo clone <repo>` lands a checkout right next to `./wp`. `npm run setup` may run it again, so guard side effects (e.g. skip a clone when the directory already exists). To clone a **private** repo, authenticate `gh` once inside (`npm run bash` → `gh auth login`; it persists in `workspace/`), or export `GH_TOKEN` on your host before setup — it's forwarded into the container.
+
+- **`--dev-script=PATH`** (or **`--dev-command="…"`** for a one-liner) — a shell script that runs in its **own long-running `dev` container** for as long as the stack is up — e.g. `cd /home/node/my-plugin && npm run watch`. It reuses the workspace image, so it runs as `node` with the same `/home/node` mount (a checkout your setup script cloned at `/home/node/<repo>` is visible to it). It's supervised: started by `npm run start`, stopped by `npm run stop`, and **restarted if it exits** — so a crashed watcher, or one whose target directory isn't there yet (setup still running), self-heals. Follow it with `npm run dev:logs`. Adding it generates a `docker-compose.override.yml` (auto-merged by Compose) and `scripts/dev.sh`.
 
 - **`--defines=PATH`** — a JSON file of `{ "WP_CONST": value }` pairs written into `wp-config.php` as constants via `wp config set`, which places them correctly (above the "stop editing" marker) and updates them in place on re-run. Booleans and numbers become raw PHP literals (`define( 'WP_DEBUG', true )`); strings are quoted (`define( 'WP_MEMORY_LIMIT', '512M' )`). Use `{ "value": "...", "raw": true }` to force a raw (unquoted) value.
 
@@ -107,13 +111,15 @@ The flags above just write into this file; you can also edit it directly and `np
   ],
   "defines": { "WP_DEBUG": true, "WP_MEMORY_LIMIT": "512M" },
   "setupScript": "scripts/user-setup.sh",
+  "devScript": "scripts/dev.sh",
   "activate": ["oxygen-elements", "breakdance-elements", "breakdance-main"]
 }
 ```
 
 - `plugins` — installed (and activated unless `"activate": false`) from a wordpress.org slug or a URL/path to a `.zip`. `version` is optional (slugs only).
 - `defines` — `wp-config.php` constants (see `--defines` above).
-- `setupScript` — project-relative path to the script run in the workspace (`--setup-script` copies your file here as `scripts/user-setup.sh`).
+- `setupScript` — project-relative path to the one-time script run in the workspace (`--setup-script` copies your file here as `scripts/user-setup.sh`).
+- `devScript` — project-relative path to the long-running dev script (`--dev-script` / `--dev-command` writes it to `scripts/dev.sh` and adds the `dev` service via `docker-compose.override.yml`). Edit `scripts/dev.sh` and `npm run restart` to change what it runs.
 - `activate` — slugs activated in order, after `setupScript` (see `--activate` above).
 
 ## Requirements
@@ -192,11 +198,12 @@ create({
     defines: { WP_DEBUG: true, WP_MEMORY_LIMIT: '512M' },
     activate: ['oxygen-elements', 'breakdance-elements', 'breakdance-main'],
     setupScript: 'set -euo pipefail\ncd /home/node\n# …clone/build/seed here…\n',
+    devScript: 'cd /home/node/breakdance && npm run dev\n',
   },
 });
 ```
 
-`setupScript` here is the script's **contents** (a string), written into the project as `scripts/user-setup.sh`. A user's `--setup-script=PATH` overrides it.
+`setupScript` / `devScript` here are the scripts' **contents** (strings), written into the project as `scripts/user-setup.sh` / `scripts/dev.sh`. A user's `--setup-script=PATH` / `--dev-script=PATH` overrides them.
 
 > **Premium plugins:** a *public* `create-<brand>` can only bake in a `.zip` URL that's publicly reachable. For licensed plugins, point at a gated endpoint you control, or have your wrapper read the URL from a prompt or an env var instead of hardcoding it.
 

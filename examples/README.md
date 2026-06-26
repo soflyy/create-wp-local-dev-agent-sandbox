@@ -11,6 +11,9 @@ them from the repo root, or copy them next to your own project and adapt.
 - **`breakdance-defines.json`** — a `--defines` file: a JSON object of
   `{ "WP_CONST": value }` pairs written into `wp-config.php` as constants
   (booleans/numbers become raw PHP literals; strings are quoted).
+- **`breakdance-dev.sh`** — a `--dev-script`: runs in the long-lived `dev`
+  container for as long as the stack is up (here, Breakdance's `npm run dev`
+  watch task against the `/home/node/breakdance` checkout).
 
 ## Run it
 
@@ -18,6 +21,7 @@ them from the repo root, or copy them next to your own project and adapt.
 npm create wp-local-dev-agent-sandbox@latest my-breakdance -- \
   --port=8090 \
   --setup-script=./examples/breakdance-setup.sh \
+  --dev-script=./examples/breakdance-dev.sh \
   --defines=./examples/breakdance-defines.json \
   --activate=oxygen-elements,breakdance-elements,breakdance-main
 ```
@@ -25,7 +29,8 @@ npm create wp-local-dev-agent-sandbox@latest my-breakdance -- \
 Order of operations on first setup: install WordPress → write the `--defines`
 constants → run the setup script (clone + Breakdance installer, which drops the
 plugins into `wp-content`) → activate `oxygen-elements`, then
-`breakdance-elements`, then `breakdance-main`, in that order.
+`breakdance-elements`, then `breakdance-main`, in that order. The dev script runs
+in parallel in its own container the whole time (`npm run dev:logs` to watch it).
 
 `soflyy/breakdance` is private, so `gh` needs auth in the workspace — run
 `gh auth login` once inside (`npm run bash`), or export `GH_TOKEN` on your host

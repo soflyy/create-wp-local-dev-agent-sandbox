@@ -10,6 +10,7 @@
     "down": "docker compose down",
     "restart": "docker compose restart",
     "logs": "docker compose logs -f",
+    "dev:logs": "docker compose logs -f dev",
     "ps": "docker compose ps",
     "bash": "bash scripts/in-workspace.sh bash",
     "claude": "bash scripts/in-workspace.sh claude --dangerously-skip-permissions",

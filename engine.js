@@ -22,6 +22,10 @@ const RENAME = {
   'gitignore': '.gitignore',
 };
 
+// Templates emitted only on demand (not copied by the blanket walk). The dev
+// service override is written only when the project has a dev script.
+const SKIP_TEMPLATES = new Set(['docker-compose.override.yml']);
+
 // When checking that the target dir is empty, these harmless entries don't count.
 const ALLOWED_EXISTING = new Set([
   '.git', '.gitignore', '.gitkeep', '.hg', '.svn',
@@ -30,10 +34,12 @@ const ALLOWED_EXISTING = new Set([
 ]);
 
 function parseArgs(argv) {
-  const out = { dir: null, port: '8080', setup: true, setupScript: null, defines: null, activate: [] };
+  const out = { dir: null, port: '8080', setup: true, setupScript: null, defines: null, activate: [], devScript: null, devCommand: null };
   for (const a of argv) {
     if (a.startsWith('--port=')) out.port = a.slice('--port='.length);
     else if (a.startsWith('--setup-script=')) out.setupScript = a.slice('--setup-script='.length);
+    else if (a.startsWith('--dev-script=')) out.devScript = a.slice('--dev-script='.length);
+    else if (a.startsWith('--dev-command=')) out.devCommand = a.slice('--dev-command='.length);
     else if (a.startsWith('--defines=')) out.defines = a.slice('--defines='.length);
     else if (a.startsWith('--activate=')) {
       out.activate = a.slice('--activate='.length).split(',').map((s) => s.trim()).filter(Boolean);
@@ -60,6 +66,10 @@ Options:
   --port=NNNN           Host port for WordPress (default: 8080)
   --setup-script=PATH   Shell script to run inside the workspace (as node) on
                         first setup — e.g. clone a repo and run its installer.
+  --dev-script=PATH     Shell script run (as node) in its own long-running 'dev'
+                        container for as long as the stack is up — e.g. a watcher.
+  --dev-command=STR     Inline form of --dev-script, e.g. --dev-command="cd
+                        /home/node/app && npm run watch".
   --defines=PATH        JSON file of { "WP_CONST": value } pairs added to
                         wp-config.php as constants (via \`wp config set\`).
   --activate=a,b,c      Plugin slugs to activate, in this exact order, after the
@@ -90,6 +100,7 @@ async function loadUserConfig() {
 
 async function copyTemplates(srcDir, destDir, vars) {
   for (const entry of await readdir(srcDir, { withFileTypes: true })) {
+    if (SKIP_TEMPLATES.has(entry.name)) continue;
     const src = join(srcDir, entry.name);
     const dest = join(destDir, RENAME[entry.name] ?? entry.name);
     if (entry.isDirectory()) {
@@ -123,6 +134,7 @@ async function applyConfig(targetDir, extra) {
     cfg.defines = { ...(cfg.defines ?? {}), ...extra.defines };
   }
   if (extra.setupScript) cfg.setupScript = extra.setupScript;
+  if (extra.devScript) cfg.devScript = extra.devScript;
   await writeFile(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
 }
 
@@ -153,6 +165,7 @@ async function readDefinesFile(path) {
  * @param {string[]} [options.preset.activate] Plugin slugs to activate (in order) after the setup script.
  * @param {object} [options.preset.defines]    { NAME: value } constants written into wp-config.php.
  * @param {string} [options.preset.setupScript] Shell-script contents run inside the workspace on setup.
+ * @param {string} [options.preset.devScript]  Shell-script contents run in the long-running 'dev' container.
  * @param {string[]} [options.argv]            CLI args (default: process.argv.slice(2)).
  */
 export async function create({ preset = {}, argv = process.argv.slice(2) } = {}) {
@@ -170,10 +183,14 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
   const projectName = basename(targetDir);
 
   // Read & validate the file-backed inputs first, so a bad --setup-script /
-  // --defines path fails before we create or write anything into targetDir.
+  // --dev-script / --defines path fails before we create or write anything.
   const setupScriptContent = args.setupScript
     ? await readFile(resolve(args.setupScript), 'utf8')
     : (preset.setupScript ?? null);
+  // --dev-script PATH wins over --dev-command STRING wins over a preset.
+  const devScriptContent = args.devScript
+    ? await readFile(resolve(args.devScript), 'utf8')
+    : (args.devCommand != null ? args.devCommand + '\n' : (preset.devScript ?? null));
   const cliDefines = args.defines ? await readDefinesFile(args.defines) : null;
 
   await mkdir(targetDir, { recursive: true });
@@ -207,11 +224,24 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
     await writeFile(join(targetDir, setupScriptRel), setupScriptContent);
   }
 
+  // A dev script runs in its own long-lived 'dev' container (see
+  // templates/docker-compose.override.yml). We drop the script at scripts/dev.sh
+  // and emit the override that adds the service — both only when one is provided,
+  // so projects without a dev script get neither the file nor the extra service.
+  let devScriptRel = null;
+  if (devScriptContent != null) {
+    devScriptRel = 'scripts/dev.sh';
+    await writeFile(join(targetDir, devScriptRel), devScriptContent);
+    const override = await readFile(join(TEMPLATES, 'docker-compose.override.yml'), 'utf8');
+    await writeFile(join(targetDir, 'docker-compose.override.yml'), override);
+  }
+
   await applyConfig(targetDir, {
     plugins: preset.plugins ?? [],
     activate: [...(preset.activate ?? []), ...args.activate],
     defines: { ...(preset.defines ?? {}), ...(cliDefines ?? {}) },
     setupScript: setupScriptRel,
+    devScript: devScriptRel,
   });
 
   // Pre-create the bind-mount host dirs (see docker-compose.yml). If they don't
@@ -267,6 +297,9 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
   console.log('  npm run claude       # launch Claude Code in the workspace');
   console.log('  npm run cursor       # launch the Cursor CLI agent in the workspace');
   console.log('  npm run bash         # shell into the workspace container');
+  if (devScriptRel) {
+    console.log('  npm run dev:logs     # follow the dev script running in the dev container');
+  }
   console.log('');
   console.log('───────────────────────────────────────────────');
   console.log('  Your WordPress site is ready:');
