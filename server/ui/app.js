@@ -111,15 +111,28 @@ function EnvRow({ env, onAction }) {
     </div>`;
 }
 
-function SessionItem({ s, selectedId, onSelect }) {
+function SessionItem({ s, selectedId, onSelect, onDelete }) {
   return html`
     <div class=${`sess ${s.id === selectedId ? 'active' : ''}`} onClick=${() => onSelect(s.id)}>
-      <div class="sess-top"><${StatusDot} status=${s.status} /> <span class="sess-title">${s.title || s.id}</span></div>
+      <div class="sess-top">
+        <${StatusDot} status=${s.status} /> <span class="sess-title">${s.title || s.id}</span>
+        <button class="sess-del lnk danger" title="Delete session" onClick=${(e) => { e.stopPropagation(); onDelete(s); }}>✕</button>
+      </div>
       <div class="sess-sub muted">${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
     </div>`;
 }
 
-function Sidebar({ sessions, envs, selectedId, onSelect, onNewEnv, onEnvAction, onSettings }) {
+function Sidebar({ sessions, envs, selectedId, onSelect, onNewEnv, onEnvAction, onSettings, onDeleteSession }) {
+  const [expanded, setExpanded] = useState(() => new Set());
+  const toggle = (id) => setExpanded((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  // The environment holding the selected session is always shown open, so a
+  // freshly-created/selected session is visible without a manual expand.
+  const selEnvId = (sessions.find((s) => s.id === selectedId) || {}).envId;
+
   return html`
     <aside class="sidebar">
       <div class="side-head">
@@ -132,13 +145,19 @@ function Sidebar({ sessions, envs, selectedId, onSelect, onNewEnv, onEnvAction, 
           ${envs.length === 0 && html`<div class="muted pad small">No environments — create one.</div>`}
           ${envs.map((e) => {
             const envSessions = sessions.filter((s) => s.envId === e.id);
+            const open = expanded.has(e.id) || e.id === selEnvId;
             return html`
               <div class="env-group" key=${e.id}>
                 <${EnvRow} env=${e} onAction=${onEnvAction} />
-                <div class="env-sessions">
-                  ${envSessions.length === 0 && html`<div class="muted pad small no-sess">No sessions yet.</div>`}
-                  ${envSessions.map((s) => html`<${SessionItem} s=${s} key=${s.id} selectedId=${selectedId} onSelect=${onSelect} />`)}
-                </div>
+                <button class="sess-toggle" onClick=${() => toggle(e.id)}>
+                  <span class="chev">${open ? '▾' : '▸'}</span>
+                  ${envSessions.length} session${envSessions.length === 1 ? '' : 's'}
+                </button>
+                ${open && html`
+                  <div class="env-sessions">
+                    ${envSessions.length === 0 && html`<div class="muted pad small no-sess">No sessions yet.</div>`}
+                    ${envSessions.map((s) => html`<${SessionItem} s=${s} key=${s.id} selectedId=${selectedId} onSelect=${onSelect} onDelete=${onDeleteSession} />`)}
+                  </div>`}
               </div>`;
           })}
         </div>
@@ -163,7 +182,7 @@ function Bubble({ it }) {
   return html`<div class="raw"><pre>${it.text}</pre></div>`;
 }
 
-function SessionView({ session, onChanged, onBack }) {
+function SessionView({ session, onChanged, onBack, onDelete }) {
   const [items, setItems] = useState([]);
   const [partial, setPartial] = useState('');
   const [busy, setBusy] = useState(false);
@@ -236,7 +255,8 @@ function SessionView({ session, onChanged, onBack }) {
                 onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); saveTitle(); } else if (e.key === 'Escape') setEditing(false); }}
                 onBlur=${saveTitle} />`
             : html`<strong title="Double-click to rename" onDblClick=${startEdit}>${session.title || id}</strong>
-                <button class="lnk small" onClick=${startEdit} title="Rename">✎</button>`}
+                <button class="lnk small" onClick=${startEdit} title="Rename">✎</button>
+                <button class="lnk small danger" onClick=${onDelete} title="Delete session">🗑</button>`}
         </div>
         <div class="bar-meta muted">
           ${session.envName} · ${session.model || 'default model'} · $${(session.costUsd || 0).toFixed(4)}
@@ -513,6 +533,14 @@ function App() {
     await api(`/presets/${id}`, { method: 'DELETE' });
     await refresh();
   };
+  const deleteSession = async (s) => {
+    if (!confirm(`Delete session "${s.title || s.id}"? This removes its transcript.`)) return;
+    try {
+      await api(`/sessions/${s.id}`, { method: 'DELETE' });
+      if (selectedId === s.id) setSelectedId(null);
+      await refresh();
+    } catch (e) { alert(`Delete failed: ${e.message}`); }
+  };
   const envAction = async (action, env) => {
     try {
       if (action === 'logs') return setLogEnvId(env.id);
@@ -531,9 +559,9 @@ function App() {
     <div class=${`layout ${selected ? 'has-selection' : ''}`}>
       <${Sidebar} sessions=${sessions} envs=${envs} selectedId=${selectedId}
         onSelect=${setSelectedId} onNewEnv=${() => setShowNewEnv(true)}
-        onEnvAction=${envAction} onSettings=${() => setAuthed(false)} />
+        onEnvAction=${envAction} onSettings=${() => setAuthed(false)} onDeleteSession=${deleteSession} />
       ${selected
-        ? html`<${SessionView} session=${selected} key=${selected.id} onChanged=${refresh} onBack=${() => setSelectedId(null)} />`
+        ? html`<${SessionView} session=${selected} key=${selected.id} onChanged=${refresh} onBack=${() => setSelectedId(null)} onDelete=${() => deleteSession(selected)} />`
         : html`<section class="main empty"><div class="muted">
             ${envs.length === 0
               ? html`No environments yet. <button class="btn" onClick=${() => setShowNewEnv(true)}>Create an environment</button> to begin.`
