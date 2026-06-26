@@ -47,6 +47,14 @@ async function main() {
   const claudeEngine = new ClaudeEngine(config, sessionStore, sessionBus);
   const sessions = { store: sessionStore, engine: claudeEngine, bus: sessionBus };
 
+  // When an env finishes provisioning, optionally kick off its initial session
+  // (the prompt passed to POST /environments). Decoupled via this hook so the
+  // manager doesn't depend on the session engine directly.
+  manager.onEnvReady = async (env, { prompt, model }) => {
+    const s = await claudeEngine.newSession(env, { prompt, model });
+    log.info(`[${env.name}] started initial session ${s.id}`);
+  };
+
   const routes = buildRoutes(config, registry, manager, sessions, presets);
   const server = createServer(config, routes);
 

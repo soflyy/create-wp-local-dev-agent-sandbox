@@ -376,6 +376,7 @@ function LogViewer({ env, onClose }) {
 
 function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset }) {
   const [name, setName] = useState('');
+  const [prompt, setPrompt] = useState('');
   const [presetId, setPresetId] = useState('');
   const [setupScript, setSetupScript] = useState('');
   const [devScript, setDevScript] = useState('');
@@ -417,7 +418,7 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
     let provision;
     try { provision = isEmpty ? undefined : buildProvision(); } catch (e) { setErr(e.message); return; }
     setBusy(true);
-    try { await onCreate(name.trim() || undefined, provision); } catch (e) { setErr(e.message); setBusy(false); }
+    try { await onCreate(name.trim() || undefined, provision, prompt.trim() || undefined); } catch (e) { setErr(e.message); setBusy(false); }
   };
   const savePreset = async () => {
     setErr('');
@@ -443,6 +444,9 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
         <p class="muted">Builds a fresh WordPress devbox (≈1 min) with the target plugin checked out. Leave everything below blank for a plain site, or provision it with a setup script, wp-config defines, and plugins to activate — saved as reusable presets in this browser's server.</p>
         <label>Name (optional)
           <input value=${name} placeholder="my-devbox (a-z, 0-9, -)" onInput=${(e) => setName(e.target.value)} />
+        </label>
+        <label>First prompt <span class="muted small">— optional; once the env is ready, a Claude session starts with this</span>
+          <textarea rows="3" value=${prompt} placeholder="e.g. Add a custom field to the Oxygen builder and verify it renders." onInput=${(e) => setPrompt(e.target.value)}></textarea>
         </label>
         <label>Preset
           <div class="row">
@@ -520,8 +524,8 @@ function App() {
     const s = await api(`/environments/${envId}/sessions`, { method: 'POST', body: JSON.stringify({ prompt, model }) });
     setNewSession(null); await refresh(); setSelectedId(s.id);
   };
-  const createEnv = async (name, provision) => {
-    await api('/environments', { method: 'POST', body: JSON.stringify({ name, provision }) });
+  const createEnv = async (name, provision, prompt) => {
+    await api('/environments', { method: 'POST', body: JSON.stringify({ name, provision, prompt }) });
     setShowNewEnv(false); refresh();
   };
   const savePreset = async (preset) => {

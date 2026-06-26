@@ -46,7 +46,7 @@ export class Manager {
 
   // ---- create -------------------------------------------------------------
 
-  async createEnvironment({ name, provision } = {}) {
+  async createEnvironment({ name, provision, prompt, model } = {}) {
     const record = await allocate(this.registry, this.config, { nameHint: name });
     this.jobs.set(record.id, 'scaffolding');
     // Materialize the provisioning inputs to files the scaffolder can read, and
@@ -57,8 +57,11 @@ export class Manager {
       provisionPlan = await this._materializeProvision(record, provision);
       if (provision.presetName) await this.registry.update(record.id, { preset: provision.presetName });
     }
+    // Optional: once the env is up, start a Claude session with this prompt
+    // (carried in-memory through the pipeline; see onEnvReady).
+    const initial = prompt ? { prompt, model } : null;
     // Fire-and-forget pipeline; status is observable via GET.
-    this._pipeline(record, provisionPlan).catch((err) => log.error(`[${record.name}] pipeline crashed:`, err));
+    this._pipeline(record, provisionPlan, initial).catch((err) => log.error(`[${record.name}] pipeline crashed:`, err));
     return record;
   }
 
@@ -91,7 +94,7 @@ export class Manager {
     return { args, scratchDir };
   }
 
-  async _pipeline(record, provisionPlan = null) {
+  async _pipeline(record, provisionPlan = null, initial = null) {
     const { config, registry } = this;
     try {
       await mkdir(config.envsDir, { recursive: true });
@@ -141,6 +144,12 @@ export class Manager {
         workerStartedAt: config.cursorWorkerAutostart ? new Date().toISOString() : null,
         lastError: null,
       });
+      // Env is up — fire the optional initial session. Best-effort: its failure
+      // must not fail the environment (the env itself is fine).
+      if (initial?.prompt) {
+        try { await this.onEnvReady?.(record, initial); }
+        catch (err) { log.warn(`[${record.name}] initial session failed:`, err.message); }
+      }
     } catch (err) {
       log.error(`[${record.name}] setup failed:`, err.message);
       await registry.update(record.id, { status: 'failed', lastError: truncate(redactErr(err)) });

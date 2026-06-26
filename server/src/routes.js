@@ -73,7 +73,9 @@ export function buildRoutes(config, registry, manager, sessions, presets) {
     route('POST', '/environments', async (ctx) => {
       try {
         const provision = normalizeProvision(ctx.body.provision);
-        const record = await manager.createEnvironment({ name: ctx.body.name, provision });
+        const prompt = typeof ctx.body.prompt === 'string' ? ctx.body.prompt.trim() : '';
+        const model = typeof ctx.body.model === 'string' && ctx.body.model.trim() ? ctx.body.model.trim() : undefined;
+        const record = await manager.createEnvironment({ name: ctx.body.name, provision, prompt: prompt || undefined, model });
         ctx.send(202, { id: record.id, name: record.name, port: record.port, wpUrl: record.wpUrl, status: record.status });
       } catch (err) {
         if (err instanceof AllocationError) throw httpErr(err.status, err.message);
