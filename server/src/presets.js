@@ -18,13 +18,13 @@ import { randomBytes } from 'node:crypto';
 import { createMutex } from './registry.js';
 
 // First-run seed. Kept here as bootstrap defaults only — the live, editable copy
-// lives in data/presets.json. The Oxygen blueprint reuses the breakdance example
-// verbatim: clone soflyy/breakdance (private — GH_TOKEN is forwarded into the
-// workspace during setup), run its installer against the site, then activate the
-// builder plugins in order.
-const OXYGEN_SETUP_SCRIPT = `#!/usr/bin/env bash
-# Provision Oxygen/Breakdance from source. Runs in the workspace as \`node\`, cwd
-# /home/node, WordPress at /home/node/wp. Idempotent: skip the clone if present.
+// lives in data/presets.json. The Oxygen / Breakdance / FutureLayer presets all
+// build soflyy/breakdance from source (private — GH_TOKEN is forwarded into the
+// workspace during setup); they differ only in BREAKDANCE_MODE and which plugins
+// they activate.
+const BREAKDANCE_SETUP_SCRIPT = `#!/usr/bin/env bash
+# Build Breakdance from source. Runs in the workspace as \`node\`, cwd /home/node,
+# WordPress at /home/node/wp. Idempotent: skip the clone if present.
 set -euo pipefail
 cd /home/node
 if [ ! -d /home/node/breakdance ]; then
@@ -32,17 +32,15 @@ if [ ! -d /home/node/breakdance ]; then
 fi
 # no-plugin-activate (soflyy/breakdance#9441): build + symlink, but DON'T let
 # setup.sh activate every breakdance plugin — the preset's own \`activate\` list
-# decides which ones go live (oxygen-elements, breakdance-elements, breakdance-main).
+# decides which ones go live.
 cd /home/node/breakdance && ./scripts/setup.sh --wp-root=/home/node/wp no-plugin-activate
 `;
 
-const OXYGEN_DEFINES = {
-  // Breakdance/Oxygen from-source dev constants. Applied before the setup script
-  // runs, so the builder activates cleanly:
-  //   BREAKDANCE_MODE — run as Oxygen (breakdance-main won't activate without it).
-  //   BREAKDANCE_DEVELOPMENT_ENVIRONMENT — dev mode.
-  //   BREAKDANCE_USE_MONOREPO_PATH — load assets from the monorepo checkout.
-  BREAKDANCE_MODE: 'oxygen',
+// Shared from-source dev constants; BREAKDANCE_MODE is set per preset. Applied
+// before the setup script runs so the builder activates cleanly:
+//   BREAKDANCE_DEVELOPMENT_ENVIRONMENT — dev mode.
+//   BREAKDANCE_USE_MONOREPO_PATH — load assets from the monorepo checkout.
+const BREAKDANCE_BASE_DEFINES = {
   BREAKDANCE_DEVELOPMENT_ENVIRONMENT: true,
   BREAKDANCE_USE_MONOREPO_PATH: true,
   WP_DEBUG: true,
@@ -56,7 +54,7 @@ const OXYGEN_DEFINES = {
 // Long-running dev build (runs in the dedicated 'dev' container for as long as
 // the stack is up; the dev-supervisor self-heals until the breakdance checkout
 // the setup script clones exists).
-const OXYGEN_DEV_SCRIPT = `#!/usr/bin/env bash
+const BREAKDANCE_DEV_SCRIPT = `#!/usr/bin/env bash
 set -euo pipefail
 cd /home/node/breakdance
 npm run dev:codespace
@@ -108,11 +106,27 @@ echo "✓ agent-connector-for-wp + universal-abilities-plugin now served from th
 const SEED_PRESETS = [
   {
     name: 'Oxygen',
-    description: 'Oxygen / Breakdance builder, built from soflyy/breakdance and pre-activated.',
-    setupScript: OXYGEN_SETUP_SCRIPT,
-    defines: OXYGEN_DEFINES,
+    description: 'Oxygen builder, built from soflyy/breakdance (BREAKDANCE_MODE=oxygen).',
+    setupScript: BREAKDANCE_SETUP_SCRIPT,
+    defines: { BREAKDANCE_MODE: 'oxygen', ...BREAKDANCE_BASE_DEFINES },
     activate: ['oxygen-elements', 'breakdance-elements', 'breakdance-main'],
-    devScript: OXYGEN_DEV_SCRIPT,
+    devScript: BREAKDANCE_DEV_SCRIPT,
+  },
+  {
+    name: 'Breakdance',
+    description: 'Breakdance builder, built from soflyy/breakdance (BREAKDANCE_MODE=breakdance).',
+    setupScript: BREAKDANCE_SETUP_SCRIPT,
+    defines: { BREAKDANCE_MODE: 'breakdance', ...BREAKDANCE_BASE_DEFINES },
+    activate: ['breakdance-main', 'breakdance-elements', 'breakdance-woocommerce'],
+    devScript: BREAKDANCE_DEV_SCRIPT,
+  },
+  {
+    name: 'FutureLayer',
+    description: 'Breakdance + the FutureLayer plugin, built from soflyy/breakdance.',
+    setupScript: BREAKDANCE_SETUP_SCRIPT,
+    defines: { BREAKDANCE_MODE: 'breakdance', ...BREAKDANCE_BASE_DEFINES },
+    activate: ['breakdance-main', 'breakdance-elements', 'breakdance-woocommerce', 'futurelayer-plugin'],
+    devScript: BREAKDANCE_DEV_SCRIPT,
   },
   {
     name: 'Agent Connector (dev)',
