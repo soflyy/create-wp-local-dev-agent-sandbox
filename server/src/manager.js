@@ -1,6 +1,6 @@
 // Orchestrates the environment lifecycle: allocate → scaffold → setup → git auth
-// → start worker → running, plus stop/start/destroy, status, logs, and a
-// reconcile loop that supervises workers.
+// → running, plus stop/start/destroy, status, logs, and a reconcile loop that
+// keeps recorded status in sync with the containers.
 
 import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
@@ -9,9 +9,7 @@ import { join, dirname } from 'node:path';
 
 import { allocate } from './allocator.js';
 import * as docker from './docker.js';
-import * as workerMod from './worker.js';
 import * as gitauth from './gitauth.js';
-import * as fleet from './fleet.js';
 import { computeStatus, coreUp, publicView } from './status.js';
 import { log, redact } from './log.js';
 
@@ -148,17 +146,8 @@ export class Manager {
       await registry.update(record.id, { status: 'configuring' });
       await gitauth.configure(record, config, this.settings.get().githubToken);
 
-      // 3. Optionally start the named Cursor worker.
-      if (config.cursorWorkerAutostart) {
-        this.jobs.set(record.id, 'starting-worker');
-        await registry.update(record.id, { status: 'starting-worker' });
-        await workerMod.start(record, config);
-      }
-      await registry.update(record.id, {
-        status: 'running',
-        workerStartedAt: config.cursorWorkerAutostart ? new Date().toISOString() : null,
-        lastError: null,
-      });
+      // 3. Up and provisioned.
+      await registry.update(record.id, { status: 'running', lastError: null });
       // Env is up — fire the optional initial session. Best-effort: its failure
       // must not fail the environment (the env itself is fine).
       if (initial?.prompt) {
@@ -177,25 +166,18 @@ export class Manager {
 
   async _gather(record) {
     const ps = await docker.ps(record);
-    const up = coreUp(ps);
-    // worker === null means "no worker expected" (autostart off) → status ignores it.
-    const worker = up && this.config.cursorWorkerAutostart
-      ? await workerMod.health(record, this.config)
-      : null;
     const jobState = this.jobs.get(record.id) || null;
-    const status = computeStatus({ record, jobState, ps, worker });
-    return { ps, worker, status };
+    const status = computeStatus({ record, jobState, ps });
+    return { ps, status };
   }
 
-  async describe(record, { fleetLookup = true } = {}) {
-    const { worker, status } = await this._gather(record);
-    let fleetInfo;
-    if (fleetLookup) fleetInfo = await fleet.lookup(record.name, this.config);
-    return publicView(record, { status, worker, fleet: fleetInfo });
+  async describe(record) {
+    const { status } = await this._gather(record);
+    return publicView(record, { status });
   }
 
   async list() {
-    return Promise.all(this.registry.list().map((r) => this.describe(r, { fleetLookup: false })));
+    return Promise.all(this.registry.list().map((r) => this.describe(r)));
   }
 
   // Is the env's core stack up (so we can exec claude/agents in it)? Cheap.
@@ -214,16 +196,11 @@ export class Manager {
   }
 
   async start(record) {
-    this.jobs.set(record.id, 'starting-worker');
+    this.jobs.set(record.id, 'configuring');
     try {
       await docker.npmRun(record, 'start', { timeout: 600_000 }); // up -d --build (cached)
       await gitauth.configure(record, this.config, this.settings.get().githubToken);
-      if (this.config.cursorWorkerAutostart) await workerMod.start(record, this.config);
-      await this.registry.update(record.id, {
-        status: 'running',
-        workerStartedAt: this.config.cursorWorkerAutostart ? new Date().toISOString() : null,
-        lastError: null,
-      });
+      await this.registry.update(record.id, { status: 'running', lastError: null });
     } finally {
       this.jobs.delete(record.id);
     }
@@ -247,11 +224,18 @@ export class Manager {
     }
   }
 
-  async logs(record, which = 'all', tail = 200) {
+  async logs(record, which = 'setup', tail = 200) {
     const out = {};
     if (which === 'setup' || which === 'all') out.setup = await tailFile(record.setupLogPath, tail);
-    if (which === 'worker' || which === 'all') out.worker = await tailFile(join(record.dir, 'workspace', '.worker.log'), tail);
     return out;
+  }
+
+  // Stop every running environment's containers (used by the control panel /
+  // shutdown). Returns the names that were stopped.
+  async stopAll() {
+    const running = this.registry.list().filter((r) => r.status !== 'stopped');
+    const results = await Promise.allSettled(running.map((r) => this.stop(r)));
+    return running.filter((_, i) => results[i].status === 'fulfilled').map((r) => r.name);
   }
 
   // ---- reconcile loop (supervisor) ----------------------------------------
@@ -262,33 +246,18 @@ export class Manager {
       try {
         const ps = await docker.ps(record);
         if (!coreUp(ps)) {
-          // Containers down: a record left mid-pipeline by a crash is failed;
-          // an explicitly stopped one stays stopped.
-          if (['running', 'degraded', 'starting-worker', 'setting-up', 'configuring', 'scaffolding'].includes(record.status)) {
-            if (record.status !== 'stopped') {
-              const patch = record.status === 'running' || record.status === 'degraded'
-                ? { status: 'stopped' }
-                : { status: 'failed', lastError: record.lastError || 'interrupted (server restart or crash)' };
-              await this.registry.update(record.id, patch);
-            }
+          // Containers down: a running/degraded env is now stopped; one left
+          // mid-pipeline by a crash/restart is failed; stopped stays stopped.
+          const s = record.status;
+          if (s === 'running' || s === 'degraded') {
+            await this.registry.update(record.id, { status: 'stopped' });
+          } else if (['setting-up', 'configuring', 'scaffolding'].includes(s)) {
+            await this.registry.update(record.id, { status: 'failed', lastError: record.lastError || 'interrupted (server restart or crash)' });
           }
           continue;
         }
-        // Containers up. If no worker is expected, just keep status running.
-        if (!this.config.cursorWorkerAutostart) {
-          if (record.status !== 'running' && record.status !== 'stopped') {
-            await this.registry.update(record.id, { status: 'running' });
-          }
-          continue;
-        }
-        // Worker expected but dead → relaunch (this is the supervision).
-        const alive = await workerMod.isRunning(record, this.config);
-        if (!alive && record.status !== 'stopped') {
-          log.info(`[${record.name}] worker not running but stack is up — relaunching`);
-          await gitauth.configure(record, this.config, this.settings.get().githubToken);
-          await workerMod.start(record, this.config);
-          await this.registry.update(record.id, { status: 'running', workerStartedAt: new Date().toISOString() });
-        } else if (alive && record.status !== 'running') {
+        // Containers up → running.
+        if (record.status !== 'running' && record.status !== 'stopped') {
           await this.registry.update(record.id, { status: 'running' });
         }
       } catch (err) {

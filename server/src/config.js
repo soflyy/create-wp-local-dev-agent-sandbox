@@ -1,8 +1,8 @@
 // Server configuration, read once from the environment and frozen.
 //
-// Secrets (CURSOR_API_KEY, GITHUB_TOKEN) live only here and in the env of the
-// child processes we spawn — never in request bodies, responses, the registry,
-// or logs. See log.js for the redactor that scrubs them if they ever leak.
+// Secrets (the GitHub + Claude tokens, managed on the Settings page) live in
+// data/settings.json and the env of the child processes we spawn — never in
+// request bodies, responses, the registry, or logs. See log.js for the redactor.
 
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, isAbsolute } from 'node:path';
@@ -62,32 +62,12 @@ export function loadConfig(env = process.env) {
     buildConcurrency: Math.max(1, parseInt(env.BUILD_CONCURRENCY || '2', 10)),
     reconcileIntervalMs: parseInt(env.RECONCILE_INTERVAL_MS || '45000', 10),
 
-    // Cursor key stays env-sourced (optional; the worker reads it). GitHub +
-    // Claude tokens are managed in Settings — these env values only seed the
-    // settings file on first run.
-    cursorApiKey: env.CURSOR_API_KEY || null,
+    // GitHub + Claude tokens are managed in Settings — these env values only
+    // seed the settings file on first run.
     seedGithubToken: env.GITHUB_TOKEN || '',
     seedClaudeToken: env.CLAUDE_CODE_OAUTH_TOKEN || '',
     gitAuthorName: env.GIT_AUTHOR_NAME || 'devbox',
     gitAuthorEmail: env.GIT_AUTHOR_EMAIL || 'devbox@localhost',
-
-    // Worker launch tuning. The worker operates from the home dir by default
-    // (provisioning — incl. checking out a plugin repo — is done by presets now;
-    // set WORKER_DIR to point the worker at a specific checkout if desired).
-    workerDir: env.WORKER_DIR || '/home/node',
-    workerIdleReleaseTimeout: env.WORKER_IDLE_RELEASE_TIMEOUT || null, // seconds, optional
-    // Worker health endpoint, bound inside the container (not published to the
-    // host — no host port consumed). Used for liveness via `curl /readyz`, since
-    // the slim image has no pgrep/ps.
-    workerManagementAddr: env.WORKER_MANAGEMENT_ADDR || '127.0.0.1:8930',
-
-    // Start a Cursor worker automatically on env create (kept available, but the
-    // focus is now Claude sessions). Set CURSOR_WORKER_AUTOSTART=0 to skip — then
-    // an env runs no worker and "running" doesn't depend on worker liveness.
-    cursorWorkerAutostart: env.CURSOR_WORKER_AUTOSTART !== '0',
-
-    // Cursor fleet API (best-effort enrichment only)
-    fleetApiUrl: env.CURSOR_FLEET_API_URL || 'https://api.cursor.com/v0/private-workers',
 
     // Claude headless sessions. NO Claude token here on purpose — Claude is
     // driven through the env's own scripts/in-workspace.sh, which resolves
@@ -116,6 +96,6 @@ export function loadConfig(env = process.env) {
 
   // Initial secret strings for the log redactor (env-seeded). Tokens managed in
   // Settings are added to the redactor after the settings store loads.
-  config.secrets = [config.cursorApiKey, config.seedGithubToken, config.seedClaudeToken].filter(Boolean);
+  config.secrets = [config.seedGithubToken, config.seedClaudeToken].filter(Boolean);
   return Object.freeze(config);
 }

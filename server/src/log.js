@@ -1,5 +1,5 @@
 // Tiny logger that redacts known secret values and token-shaped strings, so a
-// stray interpolation can never print CURSOR_API_KEY / GITHUB_TOKEN.
+// stray interpolation can never print the GitHub / Claude tokens.
 
 let SECRETS = [];
 

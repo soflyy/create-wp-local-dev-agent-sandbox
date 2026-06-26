@@ -1,20 +1,20 @@
 // Configure GitHub auth + git identity inside an environment's workspace
-// container, so the Cursor worker can clone/commit/push. Uses the shared
-// GITHUB_TOKEN via `gh auth login --with-token` + `gh auth setup-git` (gh is
+// container, so an agent can clone/commit/push. Uses the GitHub token (from
+// Settings) via `gh auth login --with-token` + `gh auth setup-git` (gh is
 // installed in the image). Secrets are passed by env name (-e), never on argv.
 //
-// Non-fatal: a bad/expired token shouldn't abort environment creation — we log
-// a warning and continue (the worker still runs; pushes will just fail until
-// the token is fixed and /start is re-run).
+// Non-fatal: a bad/expired/absent token shouldn't abort environment creation —
+// we log a warning and continue (pushes just fail until the token is fixed in
+// Settings and /start is re-run).
 
 import { exec } from './docker.js';
 import { log } from './log.js';
 
 // The token is carried in DEVBOX_GH_TOKEN (NOT GH_TOKEN/GITHUB_TOKEN): gh refuses
 // to *store* credentials with `--with-token` when GH_TOKEN/GITHUB_TOKEN is set in
-// the env (it would just use the env var, which the worker process doesn't have).
-// Storing via gh + `gh auth setup-git` persists a credential helper in
-// /home/node so the worker can clone/commit/push without the token in its env.
+// the env (it would just use the env var). Storing via gh + `gh auth setup-git`
+// persists a credential helper in /home/node so anything in the container can
+// clone/commit/push without the token in its env.
 const SCRIPT = [
   'set -e',
   'printf %s "$DEVBOX_GH_TOKEN" | gh auth login --with-token',
