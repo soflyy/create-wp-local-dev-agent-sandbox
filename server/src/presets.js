@@ -71,10 +71,9 @@ const AGENT_CONNECTOR_SETUP_SCRIPT = `#!/usr/bin/env bash
 set -euo pipefail
 SLUG=agent-connector-for-wp
 DEST=/home/node/$SLUG
-PLUGIN_DIR=/home/node/wp/wp-content/plugins/$SLUG
 
-# Drop any release-zip copy, then check out the repo (idempotent: update if present).
-wp plugin delete "$SLUG" >/dev/null 2>&1 || true
+# Drop any release-zip copies, then check out the repo (idempotent: update if present).
+wp plugin delete "$SLUG" universal-abilities-plugin >/dev/null 2>&1 || true
 if [ -d "$DEST/.git" ]; then
   git -C "$DEST" fetch --all --prune
 else
@@ -82,15 +81,20 @@ else
   gh repo clone soflyy/agent-connector-for-wp "$DEST"
 fi
 
-# vendor/ is gitignored — composer install in the plugin subdir.
-if [ -f "$DEST/plugin/composer.json" ]; then
-  composer install --no-dev --no-interaction --no-progress -d "$DEST/plugin"
-fi
-
-# Symlink the plugin subdir into wp-content and activate the checkout.
-rm -rf "$PLUGIN_DIR"
-ln -s "$DEST/plugin" "$PLUGIN_DIR"
+# Symlink both the gateway and the Universal Abilities companion from the checkout,
+# composer-install where needed (vendor/ is gitignored), and activate in order
+# (the companion declares Requires Plugins: agent-connector-for-wp).
+link_plugin() {
+  subdir="$1"; slug="$2"
+  [ -d "$DEST/$subdir" ] || return 0
+  [ -f "$DEST/$subdir/composer.json" ] && composer install --no-dev --no-interaction --no-progress -d "$DEST/$subdir"
+  rm -rf "/home/node/wp/wp-content/plugins/$slug"
+  ln -s "$DEST/$subdir" "/home/node/wp/wp-content/plugins/$slug"
+}
+link_plugin plugin "$SLUG"
+link_plugin universal-abilities-plugin universal-abilities-plugin
 wp plugin activate "$SLUG"
+wp plugin activate universal-abilities-plugin || true
 
 # If the repo ships a skill installer, link its skill(s) into the agents' dirs (non-fatal).
 SKILL_INSTALLER="$DEST/abilities-generator/scripts/install-skill.sh"
@@ -98,7 +102,7 @@ if [ -f "$SKILL_INSTALLER" ]; then
   ( cd "$DEST/abilities-generator" && bash scripts/install-skill.sh ) || echo "  (claude skill install failed; continuing)"
   ( cd "$DEST/abilities-generator" && CLAUDE_SKILLS_DIR=/home/node/.cursor/skills bash scripts/install-skill.sh ) || echo "  (cursor skill install failed; continuing)"
 fi
-echo "✓ agent-connector-for-wp now served from the git checkout at $DEST"
+echo "✓ agent-connector-for-wp + universal-abilities-plugin now served from the git checkout at $DEST"
 `;
 
 const SEED_PRESETS = [
@@ -112,7 +116,7 @@ const SEED_PRESETS = [
   },
   {
     name: 'Agent Connector (dev)',
-    description: 'Develop agent-connector-for-wp from a live git checkout (replaces the release-zip gateway).',
+    description: 'Develop agent-connector-for-wp (gateway + Universal Abilities) from a live git checkout.',
     setupScript: AGENT_CONNECTOR_SETUP_SCRIPT,
     defines: {},
     activate: [],
