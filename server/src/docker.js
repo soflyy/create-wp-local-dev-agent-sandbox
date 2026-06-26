@@ -77,33 +77,4 @@ export async function listProjects() {
   }
 }
 
-// Host pressure snapshot for GET /host.
-export async function hostInfo() {
-  const out = {};
-  await Promise.all([
-    run('docker', ['system', 'df', '--format', 'json'])
-      .then(({ stdout }) => {
-        out.dockerDf = stdout.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-      })
-      .catch(() => {
-        out.dockerDf = null;
-      }),
-    run('docker', ['ps', '-q'])
-      .then(({ stdout }) => {
-        out.runningContainers = stdout.trim() ? stdout.trim().split('\n').length : 0;
-      })
-      .catch(() => {
-        out.runningContainers = null;
-      }),
-    run('df', ['-h', '/'])
-      .then(({ stdout }) => {
-        out.diskRoot = stdout.trim().split('\n').slice(1).join('\n');
-      })
-      .catch(() => {
-        out.diskRoot = null;
-      }),
-  ]);
-  return out;
-}
-
 export { join };

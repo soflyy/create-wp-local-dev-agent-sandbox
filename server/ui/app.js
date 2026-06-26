@@ -134,7 +134,7 @@ function SessionItem({ s, selectedId, onSelect, onDelete, now }) {
     </div>`;
 }
 
-function Sidebar({ sessions, envs, selectedId, now, onSelect, onNewEnv, onEnvAction, onSettings, onDeleteSession }) {
+function Sidebar({ sessions, envs, selectedId, now, onSelect, onNewEnv, onEnvAction, onSettings, onHealth, onDeleteSession }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const toggle = (id) => setExpanded((prev) => {
     const next = new Set(prev);
@@ -149,7 +149,10 @@ function Sidebar({ sessions, envs, selectedId, now, onSelect, onNewEnv, onEnvAct
     <aside class="sidebar">
       <div class="side-head">
         <strong>Devbox</strong>
-        <button class="btn small ghost" onClick=${onSettings} title="API token">⚙</button>
+        <div class="side-head-btns">
+          <button class="btn small ghost" onClick=${onHealth} title="System health">📊</button>
+          <button class="btn small ghost" onClick=${onSettings} title="Settings">⚙</button>
+        </div>
       </div>
       <div class="side-section grow">
         <div class="section-head"><span>Environments</span><button class="btn small" onClick=${onNewEnv}>+ Env</button></div>
@@ -584,6 +587,81 @@ function SettingsModal({ onClose, onLogout }) {
     </div>`;
 }
 
+function HealthBar({ pct, tone }) {
+  const w = Math.min(100, Math.max(0, Math.round(pct || 0)));
+  return html`<div class="hbar"><div class=${`hbar-fill ${tone}`} style=${`width:${w}%`}></div></div>`;
+}
+
+function HealthModal({ onClose }) {
+  const [h, setH] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let stop = false;
+    const tick = async () => {
+      try { const d = await api('/host'); if (!stop) { setH(d); setErr(''); } }
+      catch (e) { if (!stop) setErr(e.message); }
+    };
+    tick();
+    const t = setInterval(tick, 5000); // docker stats is ~2s; poll gently
+    return () => { stop = true; clearInterval(t); };
+  }, []);
+
+  const gb = (b) => (b == null ? '—' : `${(b / 1024 ** 3).toFixed(b < 10 * 1024 ** 3 ? 1 : 0)} GB`);
+  const tone = (v, warn, bad) => (v >= bad ? 'bad' : v >= warn ? 'warn' : 'ok');
+  const dfRow = (t) => (h && h.docker.df ? h.docker.df.find((r) => r.Type === t) : null);
+  const m = h && h.memory, c = h && h.cpu, dsk = h && h.disk, est = h && h.estimate;
+  const load1 = c ? c.loadavg[0] : 0;
+
+  return html`
+    <div class="modal-bg" onClick=${onClose}>
+      <div class="modal wide health" onClick=${(e) => e.stopPropagation()}>
+        <h3>System health</h3>
+        ${err && html`<div class="err-msg">${err}</div>`}
+        ${!h && !err && html`<div class="muted">Loading… (gathering docker stats, ~2s)</div>`}
+        ${h && html`
+          <div class="hrow">
+            <span class="hlabel">Memory</span>
+            <${HealthBar} pct=${m.usedPct} tone=${tone(m.usedPct, 75, 90)} />
+            <span class="hval">${gb(m.usedBytes)} used · <b>${gb(m.availableBytes)} free</b> of ${gb(m.totalBytes)}${m.swapTotalBytes ? '' : ' · no swap'}</span>
+          </div>
+          <div class="hrow">
+            <span class="hlabel">CPU load</span>
+            <${HealthBar} pct=${(load1 / c.cores) * 100} tone=${tone(load1 / c.cores, 0.7, 1)} />
+            <span class="hval">${load1.toFixed(2)} (1m) of ${c.cores} cores · ${c.loadavg.map((x) => x.toFixed(2)).join(' / ')}</span>
+          </div>
+          ${dsk && html`<div class="hrow">
+            <span class="hlabel">Disk</span>
+            <${HealthBar} pct=${dsk.usedPct} tone=${tone(dsk.usedPct, 75, 90)} />
+            <span class="hval">${gb(dsk.usedBytes)} used · <b>${gb(dsk.availBytes)} free</b> of ${gb(dsk.totalBytes)}</span>
+          </div>`}
+          <div class="hrow">
+            <span class="hlabel">Docker</span>
+            <span class="hval wide-val">${h.docker.containersRunning}/${h.docker.containersTotal} containers${dfRow('Images') ? ` · images ${dfRow('Images').Size}` : ''}${dfRow('Build Cache') ? html` · build cache ${dfRow('Build Cache').Size} <span class="muted">(${dfRow('Build Cache').Reclaimable} reclaimable — run docker system prune)</span>` : ''}</span>
+          </div>
+          <div class=${`health-callout ${est.ramHeadroomEnvs != null && est.ramHeadroomEnvs <= 1 ? 'bad' : ''}`}>
+            ${est.ramHeadroomEnvs != null
+              ? html`Room for ≈ <b>${est.ramHeadroomEnvs}</b> more environment${est.ramHeadroomEnvs === 1 ? '' : 's'} in RAM — avg <b>${gb(est.avgEnvMemBytes)}</b>/env, ${h.environments.running} running.${m.swapTotalBytes ? '' : ' No swap: when free RAM hits zero the box starts OOM-killing processes, so keep headroom.'}`
+              : html`${h.environments.running} environments running.`}
+          </div>
+          <div class="muted small">Environments: ${h.environments.running} running · ${h.environments.count} total · cap ${h.environments.max}</div>
+          ${h.perEnv.length > 0 && html`
+            <table class="health-table">
+              <thead><tr><th>Environment</th><th>Status</th><th>Containers</th><th>Memory</th></tr></thead>
+              <tbody>
+                ${h.perEnv.map((e) => html`<tr key=${e.name}>
+                  <td>${e.name}</td>
+                  <td><${StatusDot} status=${e.status} /> ${e.status}</td>
+                  <td>${e.containers}</td>
+                  <td>${gb(e.memBytes)}</td>
+                </tr>`)}
+              </tbody>
+            </table>`}
+        `}
+        <div class="modal-foot"><button class="btn ghost" onClick=${onClose}>Close</button></div>
+      </div>
+    </div>`;
+}
+
 function TokenGate({ onSave }) {
   const [val, setVal] = useState(token.get());
   return html`
@@ -608,6 +686,7 @@ function App() {
   const [needToken, setNeedToken] = useState(false);
   const [authed, setAuthed] = useState(!!token.get());
   const [showSettings, setShowSettings] = useState(false);
+  const [showHealth, setShowHealth] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const refresh = useCallback(async () => {
@@ -693,7 +772,7 @@ function App() {
     <div class=${`layout ${selected ? 'has-selection' : ''}`}>
       <${Sidebar} sessions=${sessions} envs=${envs} selectedId=${selectedId} now=${now}
         onSelect=${setSelectedId} onNewEnv=${() => setShowNewEnv(true)}
-        onEnvAction=${envAction} onSettings=${() => setShowSettings(true)} onDeleteSession=${deleteSession} />
+        onEnvAction=${envAction} onSettings=${() => setShowSettings(true)} onHealth=${() => setShowHealth(true)} onDeleteSession=${deleteSession} />
       ${selected
         ? html`<${SessionView} session=${selected} key=${selected.id} now=${now} onChanged=${refresh} onBack=${() => setSelectedId(null)} onDelete=${() => deleteSession(selected)} />`
         : html`<section class="main empty"><div class="muted">
@@ -706,6 +785,7 @@ function App() {
       ${logEnvId && logEnv && html`<${LogViewer} env=${logEnv} onClose=${() => setLogEnvId(null)} />`}
       ${showSettings && html`<${SettingsModal} onClose=${() => setShowSettings(false)}
         onLogout=${() => { token.set(''); setShowSettings(false); setAuthed(false); setNeedToken(true); }} />`}
+      ${showHealth && html`<${HealthModal} onClose=${() => setShowHealth(false)} />`}
     </div>`;
 }
 
