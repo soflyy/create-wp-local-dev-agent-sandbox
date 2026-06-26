@@ -52,6 +52,10 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .sess-top { display: flex; align-items: center; gap: 7px; }
 .sess-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sess-time { flex: none; font-size: 11px; color: var(--muted); }
+.sess-time.working { color: var(--accent); font-weight: 600; }
+.sess-time.working .pulse { color: var(--accent); animation: blink 1.2s steps(2) infinite; }
+.bar-meta .working { color: var(--accent); font-weight: 600; }
+.bar-meta .working .pulse { animation: blink 1.2s steps(2) infinite; }
 .sess-sub { font-size: 12px; margin-top: 2px; }
 
 /* main */

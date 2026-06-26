@@ -111,20 +111,29 @@ function EnvRow({ env, onAction }) {
     </div>`;
 }
 
-function SessionItem({ s, selectedId, onSelect, onDelete }) {
+function WorkingTag({ since, now }) {
+  // Live "working Ns" while a turn is executing (since = turn start = lastActivityAt).
+  const ms = (now || Date.now()) - Date.parse(since || '');
+  return html`<span class="sess-time working" title="Claude is working right now"><span class="pulse">●</span> working ${fmtDur(ms)}</span>`;
+}
+
+function SessionItem({ s, selectedId, onSelect, onDelete, now }) {
+  const running = s.status === 'running';
   return html`
     <div class=${`sess ${s.id === selectedId ? 'active' : ''}`} onClick=${() => onSelect(s.id)}>
       <div class="sess-top">
         <${StatusDot} status=${s.status} />
         <span class="sess-title">${s.title || s.id}</span>
-        <span class="sess-time" title=${`last active ${fullTime(s.lastActivityAt)}`}>${fmtAgo(s.lastActivityAt)}</span>
+        ${running
+          ? html`<${WorkingTag} since=${s.lastActivityAt} now=${now} />`
+          : html`<span class="sess-time" title=${`last active ${fullTime(s.lastActivityAt)}`}>${fmtAgo(s.lastActivityAt)}</span>`}
         <button class="sess-del lnk danger" title="Delete session" onClick=${(e) => { e.stopPropagation(); onDelete(s); }}>✕</button>
       </div>
       <div class="sess-sub muted">started ${fmtAgo(s.createdAt, true)} · ${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
     </div>`;
 }
 
-function Sidebar({ sessions, envs, selectedId, onSelect, onNewEnv, onEnvAction, onSettings, onDeleteSession }) {
+function Sidebar({ sessions, envs, selectedId, now, onSelect, onNewEnv, onEnvAction, onSettings, onDeleteSession }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const toggle = (id) => setExpanded((prev) => {
     const next = new Set(prev);
@@ -160,7 +169,7 @@ function Sidebar({ sessions, envs, selectedId, onSelect, onNewEnv, onEnvAction, 
                 ${open && html`
                   <div class="env-sessions">
                     ${envSessions.length === 0 && html`<div class="muted pad small no-sess">No sessions yet.</div>`}
-                    ${envSessions.map((s) => html`<${SessionItem} s=${s} key=${s.id} selectedId=${selectedId} onSelect=${onSelect} onDelete=${onDeleteSession} />`)}
+                    ${envSessions.map((s) => html`<${SessionItem} s=${s} key=${s.id} selectedId=${selectedId} now=${now} onSelect=${onSelect} onDelete=${onDeleteSession} />`)}
                   </div>`}
               </div>`;
           })}
@@ -186,7 +195,7 @@ function Bubble({ it }) {
   return html`<div class="raw"><pre>${it.text}</pre></div>`;
 }
 
-function SessionView({ session, onChanged, onBack, onDelete }) {
+function SessionView({ session, now, onChanged, onBack, onDelete }) {
   const [items, setItems] = useState([]);
   const [partial, setPartial] = useState('');
   const [busy, setBusy] = useState(false);
@@ -267,7 +276,10 @@ function SessionView({ session, onChanged, onBack, onDelete }) {
           ${session.claudeSessionId && html`· <code title="claude session id">${session.claudeSessionId.slice(0, 8)}</code>`}
         </div>
         <div class="bar-meta muted" title=${`started ${fullTime(session.createdAt)}\nlast active ${fullTime(session.lastActivityAt)}`}>
-          started ${fmtAgo(session.createdAt, true)} · last active ${fmtAgo(session.lastActivityAt, true)}
+          started ${fmtAgo(session.createdAt, true)} ·${' '}
+          ${session.status === 'running'
+            ? html`<${WorkingTag} since=${session.lastActivityAt} now=${now} />`
+            : html`last active ${fmtAgo(session.lastActivityAt, true)}`}
         </div>
       </header>
       ${session.sshResumeHint && html`<div class="ssh muted" onClick=${() => navigator.clipboard?.writeText(session.sshResumeHint)} title="click to copy">SSH resume: <code>${session.sshResumeHint}</code></div>`}
@@ -595,6 +607,7 @@ function App() {
   const [needToken, setNeedToken] = useState(false);
   const [authed, setAuthed] = useState(!!token.get());
   const [showSettings, setShowSettings] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   const refresh = useCallback(async () => {
     try {
@@ -604,6 +617,14 @@ function App() {
   }, []);
 
   useEffect(() => { if (authed) { refresh(); const t = setInterval(refresh, 3000); return () => clearInterval(t); } }, [authed, refresh]);
+
+  // Tick once a second ONLY while a session is actively running, so the live
+  // "working Ns" counters advance smoothly without re-rendering when idle.
+  useEffect(() => {
+    if (!sessions.some((s) => s.status === 'running')) return undefined;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [sessions]);
 
   if (needToken || !authed) return html`<${TokenGate} onSave=${() => { setAuthed(true); setNeedToken(false); refresh(); }} />`;
 
@@ -651,11 +672,11 @@ function App() {
 
   return html`
     <div class=${`layout ${selected ? 'has-selection' : ''}`}>
-      <${Sidebar} sessions=${sessions} envs=${envs} selectedId=${selectedId}
+      <${Sidebar} sessions=${sessions} envs=${envs} selectedId=${selectedId} now=${now}
         onSelect=${setSelectedId} onNewEnv=${() => setShowNewEnv(true)}
         onEnvAction=${envAction} onSettings=${() => setShowSettings(true)} onDeleteSession=${deleteSession} />
       ${selected
-        ? html`<${SessionView} session=${selected} key=${selected.id} onChanged=${refresh} onBack=${() => setSelectedId(null)} onDelete=${() => deleteSession(selected)} />`
+        ? html`<${SessionView} session=${selected} key=${selected.id} now=${now} onChanged=${refresh} onBack=${() => setSelectedId(null)} onDelete=${() => deleteSession(selected)} />`
         : html`<section class="main empty"><div class="muted">
             ${envs.length === 0
               ? html`No environments yet. <button class="btn" onClick=${() => setShowNewEnv(true)}>Create an environment</button> to begin.`
