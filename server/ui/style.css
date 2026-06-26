@@ -58,7 +58,10 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .sess-sub { font-size: 12px; margin-top: 2px; }
 
 /* main */
-.main { display: flex; flex-direction: column; min-height: 0; }
+.main { display: flex; flex-direction: column; min-height: 0; position: relative; }
+.new-msgs { position: absolute; left: 50%; transform: translateX(-50%); bottom: 80px; z-index: 5;
+  background: var(--accent); color: #07101f; border: 0; border-radius: 99px; padding: 6px 14px;
+  font-size: 12px; font-weight: 600; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.45); }
 .main.empty { align-items: center; justify-content: center; }
 .bar { display: flex; justify-content: space-between; align-items: center; gap: 12px;
   padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }

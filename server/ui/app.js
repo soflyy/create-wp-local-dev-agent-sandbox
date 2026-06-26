@@ -209,11 +209,14 @@ function SessionView({ session, now, onChanged, onBack, onDelete }) {
   const partialRef = useRef({ text: '' });
   const seen = useRef(new Set());
   const scroller = useRef(null);
+  const stick = useRef(true); // follow the stream only while pinned near the bottom
+  const [hasNew, setHasNew] = useState(false);
   const id = session.id;
 
   useEffect(() => {
     // Reset for the newly-selected session, load history, then go live.
     setItems([]); setPartial(''); partialRef.current = { text: '' }; seen.current = new Set();
+    stick.current = true; setHasNew(false);
     let es;
     let cancelled = false;
     (async () => {
@@ -239,7 +242,27 @@ function SessionView({ session, now, onChanged, onBack, onDelete }) {
     return () => { cancelled = true; if (es) es.close(); };
   }, [id]);
 
-  useEffect(() => { if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight; }, [items, partial]);
+  // Auto-scroll only while pinned to the bottom. If the user scrolled up to read,
+  // leave them there and just flag that new content arrived.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    if (stick.current) el.scrollTop = el.scrollHeight;
+    else if (items.length || partial) setHasNew(true);
+  }, [items, partial]);
+  const onTranscriptScroll = () => {
+    const el = scroller.current;
+    if (!el) return;
+    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (stick.current && hasNew) setHasNew(false);
+  };
+  const jumpToBottom = () => {
+    const el = scroller.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    stick.current = true;
+    setHasNew(false);
+  };
 
   const running = busy || session.status === 'running';
   const send = useCallback(async () => {
@@ -287,11 +310,12 @@ function SessionView({ session, now, onChanged, onBack, onDelete }) {
         </div>
       </header>
       ${session.sshResumeHint && html`<div class="ssh muted" onClick=${() => navigator.clipboard?.writeText(session.sshResumeHint)} title="click to copy">SSH resume: <code>${session.sshResumeHint}</code></div>`}
-      <div class="transcript" ref=${scroller}>
+      <div class="transcript" ref=${scroller} onScroll=${onTranscriptScroll}>
         ${items.map((it, i) => html`<${Bubble} it=${it} key=${i} />`)}
         ${partial && html`<div class="bubble assistant live"><pre>${partial}</pre><span class="cursor">▍</span></div>`}
         ${running && !partial && html`<div class="muted pad">…thinking</div>`}
       </div>
+      ${hasNew && html`<button class="new-msgs" onClick=${jumpToBottom}>↓ New messages</button>`}
       <footer class="composer">
         <textarea
           value=${input}
