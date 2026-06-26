@@ -55,6 +55,12 @@ export function loadConfig(env = process.env) {
     dataDir,
     envsDir: abs(env.DEVBOX_ENVS_DIR, join(dataDir, 'envs')),
     registryPath: join(dataDir, 'registry.json'),
+    presetsPath: join(dataDir, 'presets.json'),
+    // Scratch space where the server materializes a create's setup-script /
+    // defines files to hand the scaffolder as --setup-script / --defines paths.
+    // The scaffolder copies their contents into the project (scripts/user-setup.sh
+    // + sandbox.config.json), so these are throwaway and cleaned up after scaffold.
+    scratchDir: join(dataDir, 'scratch'),
 
     // Allocation / limits
     portRange: parseRange(env.WP_PORT_RANGE, '9000-9999'),

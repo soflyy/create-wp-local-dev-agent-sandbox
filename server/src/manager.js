@@ -4,7 +4,7 @@
 
 import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
-import { readFile, rm, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, rm, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 
 import { allocate } from './allocator.js';
@@ -46,15 +46,52 @@ export class Manager {
 
   // ---- create -------------------------------------------------------------
 
-  async createEnvironment({ name } = {}) {
+  async createEnvironment({ name, provision } = {}) {
     const record = await allocate(this.registry, this.config, { nameHint: name });
     this.jobs.set(record.id, 'scaffolding');
+    // Materialize the provisioning inputs to files the scaffolder can read, and
+    // record the preset name (if any) for display. Done before the (async)
+    // pipeline so a write error surfaces synchronously to the caller.
+    let provisionPlan = null;
+    if (provision) {
+      provisionPlan = await this._materializeProvision(record, provision);
+      if (provision.presetName) await this.registry.update(record.id, { preset: provision.presetName });
+    }
     // Fire-and-forget pipeline; status is observable via GET.
-    this._pipeline(record).catch((err) => log.error(`[${record.name}] pipeline crashed:`, err));
+    this._pipeline(record, provisionPlan).catch((err) => log.error(`[${record.name}] pipeline crashed:`, err));
     return record;
   }
 
-  async _pipeline(record) {
+  // Write the setup script + defines to the env's scratch dir and assemble the
+  // scaffolder flags. Returns { args, scratchDir } or null when there's nothing
+  // to provision. The scaffolder copies these into the project, so they're
+  // throwaway (cleaned up after the scaffold step).
+  async _materializeProvision(record, { setupScript, devScript, defines, activate }) {
+    const scratchDir = join(this.config.scratchDir, record.name);
+    const args = [];
+    const hasDefines = defines && Object.keys(defines).length > 0;
+    if (setupScript || devScript || hasDefines) await mkdir(scratchDir, { recursive: true });
+    if (setupScript) {
+      const p = join(scratchDir, 'user-setup.sh');
+      await writeFile(p, setupScript);
+      args.push(`--setup-script=${p}`);
+    }
+    if (devScript) {
+      const p = join(scratchDir, 'dev.sh');
+      await writeFile(p, devScript);
+      args.push(`--dev-script=${p}`);
+    }
+    if (hasDefines) {
+      const p = join(scratchDir, 'defines.json');
+      await writeFile(p, JSON.stringify(defines, null, 2));
+      args.push(`--defines=${p}`);
+    }
+    if (activate && activate.length) args.push(`--activate=${activate.join(',')}`);
+    if (!args.length) return null;
+    return { args, scratchDir };
+  }
+
+  async _pipeline(record, provisionPlan = null) {
     const { config, registry } = this;
     try {
       await mkdir(config.envsDir, { recursive: true });
@@ -66,13 +103,24 @@ export class Manager {
       //    Bounded by the build semaphore; output captured to the setup log.
       this.jobs.set(record.id, 'setting-up');
       await registry.update(record.id, { status: 'setting-up', setupStartedAt: new Date().toISOString() });
+      const scaffoldArgs = [
+        join(config.scaffolderDir, 'index.js'),
+        record.dir,
+        `--port=${record.port}`,
+        ...(provisionPlan ? provisionPlan.args : []),
+      ];
       await this.buildSem.run(() =>
-        this._spawnLogged('node', [join(config.scaffolderDir, 'index.js'), record.dir, `--port=${record.port}`], {
+        this._spawnLogged('node', scaffoldArgs, {
           logPath: record.setupLogPath,
           truncate: true,
           timeout: 30 * 60 * 1000,
         }),
       );
+      // The scaffolder has copied the provisioning inputs into the project
+      // (scripts/user-setup.sh + sandbox.config.json); the scratch copies are
+      // no longer needed. Re-runs (npm run setup/reset, "retry") use the
+      // project's own copies, so this doesn't break recovery.
+      if (provisionPlan) await rm(provisionPlan.scratchDir, { recursive: true, force: true }).catch(() => {});
       await registry.update(record.id, { setupFinishedAt: new Date().toISOString() });
 
       // 2. Git auth (non-fatal), then swap the target plugin to a live git

@@ -93,16 +93,19 @@ function EnvRow({ env, onAction }) {
     <div class="env">
       <div class="env-top">
         <${StatusDot} status=${env.status} /> <span class="env-name">${env.name}</span>
+        ${env.preset && html`<span class="badge" title="provisioned from preset">${env.preset}</span>`}
         <a class="env-port" href=${wpUrl} target="_blank" rel="noreferrer" onClick=${(e) => e.stopPropagation()}>:${env.port}</a>
       </div>
       <div class="env-actions">
         ${building
-          ? html`<span class="muted small">${env.status}…</span>`
+          ? html`<span class="muted small">${env.status}…</span>
+            <button class="lnk" onClick=${() => onAction('logs', env)}>logs</button>`
           : html`
             ${up && html`<button class="lnk" onClick=${() => onAction('session', env)}>+ session</button>`}
             ${up && html`<button class="lnk" onClick=${() => onAction('stop', env)}>stop</button>`}
             ${env.status === 'stopped' && html`<button class="lnk" onClick=${() => onAction('start', env)}>start</button>`}
             ${env.status === 'failed' && html`<button class="lnk" onClick=${() => onAction('start', env)}>retry</button>`}
+            <button class="lnk" onClick=${() => onAction('logs', env)}>logs</button>
             <button class="lnk danger" onClick=${() => onAction('delete', env)}>delete</button>`}
       </div>
     </div>`;
@@ -267,22 +270,160 @@ function NewSessionModal({ envs, preselect, onClose, onCreate }) {
     </div>`;
 }
 
-function NewEnvModal({ onClose, onCreate }) {
-  const [name, setName] = useState('');
+function fmtDur(ms) {
+  if (!ms || ms < 0) ms = 0;
+  const s = Math.floor(ms / 1000), m = Math.floor(s / 60);
+  return m ? `${m}m ${s % 60}s` : `${s}s`;
+}
+
+function LogViewer({ env, onClose }) {
+  const [text, setText] = useState('');
   const [err, setErr] = useState('');
-  const [busy, setBusy] = useState(false);
-  const create = async () => {
-    setBusy(true); setErr('');
-    try { await onCreate(name.trim() || undefined); } catch (e) { setErr(e.message); setBusy(false); }
+  const [now, setNow] = useState(() => Date.now());
+  const box = useRef(null);
+  const stick = useRef(true); // keep pinned to bottom unless the user scrolls up
+  const lastChange = useRef({ text: null, at: Date.now() }); // when the log last grew
+
+  useEffect(() => {
+    let stop = false;
+    const tick = async () => {
+      try {
+        const { setup } = await api(`/environments/${env.id}/logs?which=setup&tail=2000`);
+        if (stop) return;
+        const t = setup || '';
+        if (t !== lastChange.current.text) { lastChange.current = { text: t, at: Date.now() }; setText(t); }
+        setErr('');
+      } catch (e) { if (!stop) setErr(e.message); }
+    };
+    tick();
+    const t = setInterval(tick, 2000);
+    return () => { stop = true; clearInterval(t); };
+  }, [env.id]);
+
+  // 1s ticker so the elapsed/idle counters stay live even when the log is quiet.
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+
+  useEffect(() => { if (stick.current && box.current) box.current.scrollTop = box.current.scrollHeight; }, [text]);
+  const onScroll = () => {
+    const el = box.current;
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
   };
+
+  const building = TRANSIENT_ENV.includes(env.status);
+  const startedAt = Date.parse(env.setupStartedAt || env.createdAt || '') || now;
+  const idle = now - lastChange.current.at;
   return html`
     <div class="modal-bg" onClick=${onClose}>
-      <div class="modal" onClick=${(e) => e.stopPropagation()}>
+      <div class="modal wide logs" onClick=${(e) => e.stopPropagation()}>
+        <h3><${StatusDot} status=${env.status} /> Setup log — ${env.name}
+          <span class="muted small">${env.status}${building ? ` · ${fmtDur(now - startedAt)} elapsed` : ''}</span></h3>
+        ${building && html`<div class="heartbeat muted small">
+          <span class="pulse">●</span> live · last output ${fmtDur(idle)} ago${idle > 15000 ? ' — long step, still working…' : ''}</div>`}
+        ${err && html`<div class="err-msg">${err}</div>`}
+        ${env.lastError && html`<div class="err-msg">${env.lastError}</div>`}
+        <pre class="logbox" ref=${box} onScroll=${onScroll}>${text || '(no output yet…)'}</pre>
+        <div class="modal-foot">
+          <button class="btn ghost" onClick=${onClose}>Close</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset }) {
+  const [name, setName] = useState('');
+  const [presetId, setPresetId] = useState('');
+  const [setupScript, setSetupScript] = useState('');
+  const [devScript, setDevScript] = useState('');
+  const [definesText, setDefinesText] = useState('');
+  const [activateText, setActivateText] = useState('');
+  const [presetName, setPresetName] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // Load a saved preset's fields into the form (still editable before create).
+  const loadPreset = (id) => {
+    setPresetId(id);
+    const p = presets.find((x) => x.id === id);
+    if (!p) { setSetupScript(''); setDevScript(''); setDefinesText(''); setActivateText(''); return; }
+    setSetupScript(p.setupScript || '');
+    setDevScript(p.devScript || '');
+    setDefinesText(p.defines && Object.keys(p.defines).length ? JSON.stringify(p.defines, null, 2) : '');
+    setActivateText((p.activate || []).join(', '));
+  };
+
+  // Parse the form into a provision object, or throw a friendly error.
+  const buildProvision = () => {
+    let defines = {};
+    const dt = definesText.trim();
+    if (dt) {
+      let parsed;
+      try { parsed = JSON.parse(dt); } catch { throw new Error('Defines must be valid JSON.'); }
+      if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) throw new Error('Defines must be a JSON object of { "WP_CONST": value } pairs.');
+      defines = parsed;
+    }
+    const activate = activateText.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+    const sel = presets.find((x) => x.id === presetId);
+    return { setupScript, devScript, defines, activate, presetName: sel ? sel.name : null };
+  };
+  const isEmpty = !setupScript.trim() && !devScript.trim() && !definesText.trim() && !activateText.trim();
+
+  const create = async () => {
+    setErr('');
+    let provision;
+    try { provision = isEmpty ? undefined : buildProvision(); } catch (e) { setErr(e.message); return; }
+    setBusy(true);
+    try { await onCreate(name.trim() || undefined, provision); } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  const savePreset = async () => {
+    setErr('');
+    const nm = presetName.trim();
+    if (!nm) { setErr('Enter a name to save this as a preset.'); return; }
+    let provision;
+    try { provision = buildProvision(); } catch (e) { setErr(e.message); return; }
+    try {
+      const p = await onSavePreset({ name: nm, setupScript: provision.setupScript, devScript: provision.devScript, defines: provision.defines, activate: provision.activate });
+      setPresetId(p.id); setPresetName('');
+    } catch (e) { setErr(e.message); }
+  };
+  const deletePreset = async () => {
+    const p = presets.find((x) => x.id === presetId);
+    if (!p || !confirm(`Delete preset "${p.name}"?`)) return;
+    try { await onDeletePreset(p.id); setPresetId(''); } catch (e) { setErr(e.message); }
+  };
+
+  return html`
+    <div class="modal-bg" onClick=${onClose}>
+      <div class="modal wide" onClick=${(e) => e.stopPropagation()}>
         <h3>New environment</h3>
-        <p class="muted">Builds a fresh WordPress devbox (≈1 min) with the target plugin checked out. Leave the name blank to auto-generate.</p>
+        <p class="muted">Builds a fresh WordPress devbox (≈1 min) with the target plugin checked out. Leave everything below blank for a plain site, or provision it with a setup script, wp-config defines, and plugins to activate — saved as reusable presets in this browser's server.</p>
         <label>Name (optional)
           <input value=${name} placeholder="my-devbox (a-z, 0-9, -)" onInput=${(e) => setName(e.target.value)} />
         </label>
+        <label>Preset
+          <div class="row">
+            <select value=${presetId} onChange=${(e) => loadPreset(e.target.value)}>
+              <option value="">— None (custom) —</option>
+              ${presets.map((p) => html`<option value=${p.id} key=${p.id}>${p.name}</option>`)}
+            </select>
+            ${presetId && html`<button class="btn small ghost danger" onClick=${deletePreset} title="Delete this preset">Delete</button>`}
+          </div>
+        </label>
+        <label>Setup script <span class="muted small">— runs once in the workspace as <code>node</code> (cwd /home/node, WordPress at ./wp)</span>
+          <textarea class="mono" rows="6" value=${setupScript} placeholder=${'#!/usr/bin/env bash\nset -euo pipefail\ncd /home/node\ngh repo clone owner/repo\n…'} onInput=${(e) => setSetupScript(e.target.value)}></textarea>
+        </label>
+        <label>Dev script <span class="muted small">— long-running; runs in its own <code>dev</code> container for as long as the stack is up (watchers/builds)</span>
+          <textarea class="mono" rows="3" value=${devScript} placeholder=${'#!/usr/bin/env bash\ncd /home/node/breakdance\nnpm run dev:codespace'} onInput=${(e) => setDevScript(e.target.value)}></textarea>
+        </label>
+        <label>wp-config defines <span class="muted small">— JSON object; booleans/numbers become raw PHP literals</span>
+          <textarea class="mono" rows="4" value=${definesText} placeholder=${'{\n  "WP_DEBUG": true,\n  "WP_MEMORY_LIMIT": "512M"\n}'} onInput=${(e) => setDefinesText(e.target.value)}></textarea>
+        </label>
+        <label>Activate plugins <span class="muted small">— slugs, in order, comma-separated</span>
+          <input value=${activateText} placeholder="oxygen-elements, breakdance-elements, breakdance-main" onInput=${(e) => setActivateText(e.target.value)} />
+        </label>
+        <div class="row save-preset">
+          <input value=${presetName} placeholder="Save these as a preset named…" onInput=${(e) => setPresetName(e.target.value)} />
+          <button class="btn small ghost" onClick=${savePreset} disabled=${!presetName.trim()}>Save preset</button>
+        </div>
         ${err && html`<div class="err-msg">${err}</div>`}
         <div class="modal-foot">
           <button class="btn ghost" onClick=${onClose}>Cancel</button>
@@ -308,16 +449,18 @@ function TokenGate({ onSave }) {
 function App() {
   const [sessions, setSessions] = useState([]);
   const [envs, setEnvs] = useState([]);
+  const [presets, setPresets] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [newSession, setNewSession] = useState(null); // null | { preselect? }
   const [showNewEnv, setShowNewEnv] = useState(false);
+  const [logEnvId, setLogEnvId] = useState(null);
   const [needToken, setNeedToken] = useState(false);
   const [authed, setAuthed] = useState(!!token.get());
 
   const refresh = useCallback(async () => {
     try {
-      const [s, e] = await Promise.all([api('/sessions'), api('/environments')]);
-      setSessions(s.sessions); setEnvs(e.environments); setNeedToken(false);
+      const [s, e, p] = await Promise.all([api('/sessions'), api('/environments'), api('/presets')]);
+      setSessions(s.sessions); setEnvs(e.environments); setPresets(p.presets); setNeedToken(false);
     } catch (err) { if (err.status === 401) setNeedToken(true); }
   }, []);
 
@@ -326,17 +469,28 @@ function App() {
   if (needToken || !authed) return html`<${TokenGate} onSave=${() => { setAuthed(true); setNeedToken(false); refresh(); }} />`;
 
   const selected = sessions.find((s) => s.id === selectedId);
+  const logEnv = envs.find((e) => e.id === logEnvId);
 
   const createSession = async (envId, prompt, model) => {
     const s = await api(`/environments/${envId}/sessions`, { method: 'POST', body: JSON.stringify({ prompt, model }) });
     setNewSession(null); await refresh(); setSelectedId(s.id);
   };
-  const createEnv = async (name) => {
-    await api('/environments', { method: 'POST', body: JSON.stringify({ name }) });
+  const createEnv = async (name, provision) => {
+    await api('/environments', { method: 'POST', body: JSON.stringify({ name, provision }) });
     setShowNewEnv(false); refresh();
+  };
+  const savePreset = async (preset) => {
+    const p = await api('/presets', { method: 'POST', body: JSON.stringify(preset) });
+    await refresh();
+    return p;
+  };
+  const deletePreset = async (id) => {
+    await api(`/presets/${id}`, { method: 'DELETE' });
+    await refresh();
   };
   const envAction = async (action, env) => {
     try {
+      if (action === 'logs') return setLogEnvId(env.id);
       if (action === 'session') return setNewSession({ preselect: env.id });
       if (action === 'start') await api(`/environments/${env.id}/start`, { method: 'POST' });
       if (action === 'stop') await api(`/environments/${env.id}/stop`, { method: 'POST' });
@@ -361,7 +515,8 @@ function App() {
               : html`Select a session, or <button class="btn" onClick=${() => setNewSession({})}>start a new one</button>.`}
           </div></section>`}
       ${newSession && html`<${NewSessionModal} envs=${envs} preselect=${newSession.preselect} onClose=${() => setNewSession(null)} onCreate=${createSession} />`}
-      ${showNewEnv && html`<${NewEnvModal} onClose=${() => setShowNewEnv(false)} onCreate=${createEnv} />`}
+      ${showNewEnv && html`<${NewEnvModal} presets=${presets} onClose=${() => setShowNewEnv(false)} onCreate=${createEnv} onSavePreset=${savePreset} onDeletePreset=${deletePreset} />`}
+      ${logEnvId && logEnv && html`<${LogViewer} env=${logEnv} onClose=${() => setLogEnvId(null)} />`}
     </div>`;
 }
 

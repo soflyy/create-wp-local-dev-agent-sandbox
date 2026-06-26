@@ -9,6 +9,7 @@ import { dirname, join, resolve } from 'node:path';
 import { loadConfig } from './config.js';
 import { initLog, log } from './log.js';
 import { Registry } from './registry.js';
+import { PresetStore } from './presets.js';
 import { Manager } from './manager.js';
 import { SessionStore } from './sessions.js';
 import { SessionBus } from './sessionbus.js';
@@ -36,6 +37,7 @@ async function main() {
   if (envFile) log.info(`loaded env from ${envFile}`);
 
   const registry = await new Registry(config.registryPath).load();
+  const presets = await new PresetStore(config.presetsPath).load();
   const manager = new Manager(config, registry);
 
   // Claude session subsystem.
@@ -45,7 +47,7 @@ async function main() {
   const claudeEngine = new ClaudeEngine(config, sessionStore, sessionBus);
   const sessions = { store: sessionStore, engine: claudeEngine, bus: sessionBus };
 
-  const routes = buildRoutes(config, registry, manager, sessions);
+  const routes = buildRoutes(config, registry, manager, sessions, presets);
   const server = createServer(config, routes);
 
   server.listen(config.port, config.bind, () => {
