@@ -94,7 +94,8 @@ function EnvRow({ env, onAction }) {
       <div class="env-top">
         <${StatusDot} status=${env.status} /> <span class="env-name">${env.name}</span>
         ${env.preset && html`<span class="badge" title="provisioned from preset">${env.preset}</span>`}
-        <a class="env-port" href=${wpUrl} target="_blank" rel="noreferrer" onClick=${(e) => e.stopPropagation()}>:${env.port}</a>
+        <a class="env-port" href=${wpUrl} target="_blank" rel="noreferrer" title="Open the site front end" onClick=${(e) => e.stopPropagation()}>:${env.port}</a>
+        ${up && html`<button class="env-admin lnk" title="One-click passwordless wp-admin login" onClick=${(e) => { e.stopPropagation(); onAction('admin-login', env); }}>admin ↗</button>`}
       </div>
       <div class="env-actions">
         ${building
@@ -114,7 +115,7 @@ function EnvRow({ env, onAction }) {
 function WorkingTag({ since, now }) {
   // Live "working Ns" while a turn is executing (since = turn start = lastActivityAt).
   const ms = (now || Date.now()) - Date.parse(since || '');
-  return html`<span class="sess-time working" title="Claude is working right now"><span class="pulse">●</span> working ${fmtDur(ms)}</span>`;
+  return html`<span class="sess-time working" title="Claude is working right now">working ${fmtDur(ms)}</span>`;
 }
 
 function SessionItem({ s, selectedId, onSelect, onDelete, now }) {
@@ -127,7 +128,7 @@ function SessionItem({ s, selectedId, onSelect, onDelete, now }) {
         ${running
           ? html`<${WorkingTag} since=${s.lastActivityAt} now=${now} />`
           : html`<span class="sess-time" title=${`last active ${fullTime(s.lastActivityAt)}`}>${fmtAgo(s.lastActivityAt)}</span>`}
-        <button class="sess-del lnk danger" title="Delete session" onClick=${(e) => { e.stopPropagation(); onDelete(s); }}>✕</button>
+        <button class="sess-del lnk" title="Delete session" onClick=${(e) => { e.stopPropagation(); onDelete(s); }}>🗑</button>
       </div>
       <div class="sess-sub muted">started ${fmtAgo(s.createdAt, true)} · ${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
     </div>`;
@@ -657,6 +658,18 @@ function App() {
     } catch (e) { alert(`Delete failed: ${e.message}`); }
   };
   const envAction = async (action, env) => {
+    if (action === 'admin-login') {
+      // Open the tab synchronously (in the click gesture) so popup blockers allow
+      // it, then point it at the minted, host-rebased login URL.
+      const w = window.open('', '_blank');
+      try {
+        const { loginUrl } = await api(`/environments/${env.id}/admin-login`, { method: 'POST' });
+        const u = new URL(loginUrl);
+        const dest = `${location.protocol}//${location.hostname}:${env.port}/?${u.searchParams.toString()}`;
+        if (w) w.location = dest; else window.open(dest, '_blank', 'noopener');
+      } catch (e) { if (w) w.close(); alert(`Admin login failed: ${e.message}`); }
+      return;
+    }
     try {
       if (action === 'logs') return setLogEnvId(env.id);
       if (action === 'session') return setNewSession({ preselect: env.id });
