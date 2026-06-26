@@ -4,7 +4,7 @@
 import { readFile, rm } from 'node:fs/promises';
 import { route } from './http.js';
 import { addSecrets } from './log.js';
-import { hostInfo } from './docker.js';
+import { hostInfo, exec } from './docker.js';
 import { AllocationError } from './allocator.js';
 import { openSse } from './sse.js';
 import { makeStaticHandler } from './static.js';
@@ -97,6 +97,25 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
       const which = ctx.query.get('which') || 'all';
       const tail = Math.min(parseInt(ctx.query.get('tail') || '200', 10) || 200, 5000);
       ctx.send(200, await manager.logs(envOr404(ctx), which, tail));
+    }),
+    // One-click passwordless wp-admin login: mint a one-time, 5-min link via the
+    // agent-connector ability already installed in every env. Returns a localhost
+    // URL with the token; the UI rebases the host:port (redemption uses the
+    // browser's request host, so the token is host-agnostic).
+    route('POST', '/environments/:id/admin-login', async (ctx) => {
+      const env = envOr404(ctx);
+      await assertUsable(env);
+      let res;
+      try {
+        res = await exec(env, 'workspace', ['wp', 'eval', ADMIN_LOGIN_PHP], { timeout: 30_000 });
+      } catch (err) {
+        throw httpErr(502, `could not mint admin login link: ${String(err.stderr || err.message || '').trim().slice(0, 200)}`);
+      }
+      const url = String(res.stdout || '').trim();
+      if (!/^https?:\/\/\S*acfw_login=/.test(url)) {
+        throw httpErr(502, `admin login link unavailable: ${String(res.stderr || url || '').trim().slice(0, 200)}`);
+      }
+      ctx.send(200, { loginUrl: url });
     }),
     route('POST', '/environments/:id/stop', async (ctx) => ctx.send(200, await manager.stop(envOr404(ctx)))),
     route('POST', '/environments/:id/start', async (ctx) => ctx.send(200, await manager.start(envOr404(ctx)))),
@@ -218,6 +237,20 @@ function httpErr(status, message) {
   e.status = status;
   return e;
 }
+
+// Run inside the workspace via `wp eval`: mint a one-time admin login URL for the
+// site's first administrator through the agent-connector ability's service. The
+// FQCN is the same whether the companion ships as default- or universal-abilities.
+const ADMIN_LOGIN_PHP = `
+$admins = get_users(array('role' => 'administrator', 'number' => 1, 'orderby' => 'ID'));
+$u = $admins ? $admins[0] : null;
+if (!$u) { fwrite(STDERR, 'no administrator user'); exit(1); }
+$cls = 'AgentConnectorForWp\\DefaultAbilities\\Services\\AdminLoginLink';
+if (!class_exists($cls)) { fwrite(STDERR, 'abilities plugin (admin login) not active'); exit(1); }
+$r = $cls::create($u->ID, 'index.php', 300);
+if (is_wp_error($r)) { fwrite(STDERR, $r->get_error_message()); exit(1); }
+echo $r['login_url'];
+`;
 
 const SLUG_RE = /^[a-z0-9][a-z0-9._-]*$/i; // plugin slug
 const CONST_RE = /^[A-Za-z_][A-Za-z0-9_]*$/; // PHP constant name

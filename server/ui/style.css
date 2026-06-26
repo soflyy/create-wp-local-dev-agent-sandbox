@@ -7,7 +7,7 @@
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
 #root, .layout { height: 100vh; }
-.layout { display: grid; grid-template-columns: 300px 1fr; }
+.layout { display: grid; grid-template-columns: 420px 1fr; }
 .muted { color: var(--muted); }
 .pad { padding: 12px; }
 code { background: var(--panel2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
@@ -28,6 +28,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .env-top { display: flex; align-items: center; gap: 7px; }
 .env-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .env-port { margin-left: auto; color: var(--accent); font-size: 12px; text-decoration: none; }
+.env-admin { flex: none; margin-left: 10px; font-size: 12px; color: var(--accent); }
 .env-actions { display: flex; gap: 10px; margin-top: 3px; padding-left: 16px; }
 .lnk { background: none; border: 0; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0; }
 .lnk:hover { text-decoration: underline; }
@@ -41,7 +42,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .env-sessions { padding-left: 12px; border-left: 2px solid var(--line); margin: 0 0 6px 16px; }
 .env-sessions .no-sess { padding: 4px 8px; }
 .env-sessions .sess { border-bottom: 0; border-radius: 6px; padding: 6px 8px; }
-.sess-del { margin-left: auto; opacity: 0; font-size: 12px; }
+.sess-del { flex: none; opacity: 0; font-size: 12px; }
 .sess:hover .sess-del, .sess.active .sess-del { opacity: 0.7; }
 .sess-del:hover { opacity: 1; }
 .rename { font: inherit; font-weight: 600; background: var(--bg); color: var(--text);
@@ -50,7 +51,9 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .sess:hover { background: var(--panel2); }
 .sess.active { background: var(--accent2); }
 .sess-top { display: flex; align-items: center; gap: 7px; }
-.sess-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-time { flex: none; font-size: 11px; color: var(--muted); }
+.sess-time.working, .bar-meta .working { color: var(--accent); }
 .sess-sub { font-size: 12px; margin-top: 2px; }
 
 /* main */
