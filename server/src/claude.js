@@ -13,9 +13,34 @@ import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { exec } from './docker.js';
 import { log, redact } from './log.js';
 
 const CLAUDE_CWD = '/home/node'; // in-workspace.sh runs claude here (container WORKDIR)
+
+// A `claude -p` turn runs INSIDE the workspace container (via `docker compose
+// exec`), so it does NOT die when the server / the exec client dies — it's
+// reparented to the container's init and keeps running. We must reap it
+// explicitly on interrupt, shutdown, and restart; otherwise a later --resume
+// spawns a SECOND claude that races the orphan over the same WordPress install.
+// The slim image has no pkill, so sweep /proc. TERM, then KILL stragglers.
+const REAP_CLAUDE = `self=$$
+for sig in TERM KILL; do
+  for d in /proc/[0-9]*; do
+    pid=\${d#/proc/}; [ "$pid" = "$self" ] && continue
+    c=$(tr '\\0' ' ' < "$d/cmdline" 2>/dev/null)
+    case "$c" in "claude -p "*) kill -$sig "$pid" 2>/dev/null ;; esac
+  done
+  [ "$sig" = TERM ] && sleep 1
+done`;
+
+// Kill any in-container claude turn for this env (best-effort; no-op if the
+// container is down or nothing matches).
+export async function reapClaude(env) {
+  try {
+    await exec(env, 'workspace', ['sh', '-c', REAP_CLAUDE], { timeout: 15_000 });
+  } catch { /* container gone or nothing to kill */ }
+}
 
 export class ClaudeEngine {
   constructor(config, store, bus, settings) {
@@ -92,7 +117,7 @@ export class ClaudeEngine {
     const claudeToken = this.settings && this.settings.get().claudeToken;
     const childEnv = claudeToken ? { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: claudeToken } : process.env;
     const child = spawn('bash', args, { cwd: env.dir, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
-    const entry = { child, ndjson, interrupting: false };
+    const entry = { child, ndjson, interrupting: false, env };
     this.active.set(session.id, entry);
 
     let buf = '';
@@ -174,15 +199,25 @@ export class ClaudeEngine {
     const a = this.active.get(id);
     if (!a) return false;
     a.interrupting = true;
-    a.child.kill('SIGINT');
+    a.child.kill('SIGINT'); // the local docker-exec client
+    if (a.env) reapClaude(a.env).catch(() => {}); // the in-container turn (survives the client)
     return true;
   }
 
+  // Interrupt every active turn (local client + in-container). Returns the count.
+  interruptAll() {
+    const ids = [...this.active.keys()];
+    for (const id of ids) this.interrupt(id);
+    return ids.length;
+  }
+
   killEnvSessions(envId) {
+    let env = null;
     for (const s of this.store.listByEnv(envId)) {
       const a = this.active.get(s.id);
-      if (a) a.child.kill('SIGTERM');
+      if (a) { a.interrupting = true; a.child.kill('SIGTERM'); env = a.env; }
     }
+    if (env) reapClaude(env).catch(() => {});
   }
 }
 

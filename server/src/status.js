@@ -1,12 +1,10 @@
-// Pure live-status computation. Reconciles three signals the caller gathers:
+// Pure live-status computation. Reconciles two signals the caller gathers:
 //   - jobState: the transient state of an in-flight create/start pipeline (or null)
 //   - ps:       parsed `docker compose ps` for the project
-//   - worker:   { running, healthy, state } from worker.health (or null)
 //
-// Container-up and worker-alive are independent: containers up but worker dead
-// surfaces as "degraded".
+// "degraded" = some but not all core containers are up.
 
-export const TRANSIENT = new Set(['scaffolding', 'setting-up', 'configuring', 'starting-worker', 'destroying']);
+export const TRANSIENT = new Set(['scaffolding', 'setting-up', 'configuring', 'destroying']);
 
 // Services whose "running" state means the stack is up. Playwright is present
 // but not gated on (it's the heaviest and least essential to core operation).
@@ -31,7 +29,7 @@ export function anyUp(ps) {
   return runningServices(ps).size > 0;
 }
 
-export function computeStatus({ record, jobState, ps, worker }) {
+export function computeStatus({ record, jobState, ps }) {
   // An in-flight pipeline wins — it's the authoritative transient state.
   if (jobState && TRANSIENT.has(jobState)) return jobState;
 
@@ -40,17 +38,11 @@ export function computeStatus({ record, jobState, ps, worker }) {
 
   if (!anyUp(ps)) return 'stopped';
   if (!coreUp(ps)) return 'degraded'; // some but not all core services up
-
-  // Core stack is up. `worker === null` means no Cursor worker is expected for
-  // this env (autostart off) — it's simply running. Otherwise worker liveness
-  // decides running vs degraded.
-  if (worker == null) return 'running';
-  if (worker.running) return 'running';
-  return 'degraded';
+  return 'running';
 }
 
 // Public-facing view of an environment (no secrets).
-export function publicView(record, { status, worker, fleet }) {
+export function publicView(record, { status }) {
   return {
     id: record.id,
     name: record.name,
@@ -58,11 +50,8 @@ export function publicView(record, { status, worker, fleet }) {
     wpUrl: record.wpUrl,
     status,
     preset: record.preset || null,
-    worker: worker ? { running: worker.running, healthy: worker.healthy, state: worker.state } : null,
     createdAt: record.createdAt,
     setupStartedAt: record.setupStartedAt,
-    workerStartedAt: record.workerStartedAt,
     lastError: record.lastError,
-    ...(fleet !== undefined ? { fleet } : {}),
   };
 }

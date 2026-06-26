@@ -65,6 +65,29 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
       ctx.send(200, { ...h, sessions: sessions.store.list().length });
     }),
 
+    // ---- control panel (stop / shut down) ---------------------------------
+    // Interrupt every running Claude turn (local client + the in-container
+    // process, which otherwise survives). Leaves environments running.
+    route('POST', '/control/interrupt-all', async (ctx) => {
+      ctx.send(200, { interrupted: sessions.engine.interruptAll() });
+    }),
+    // Stop all environment containers (also interrupts their turns; stopping the
+    // container kills anything inside it).
+    route('POST', '/control/stop-all', async (ctx) => {
+      sessions.engine.interruptAll();
+      ctx.send(200, { stopped: await manager.stopAll() });
+    }),
+    // Full teardown: interrupt turns, stop every env's containers, then exit the
+    // server process. The "shut down everything" button.
+    route('POST', '/control/shutdown', async (ctx) => {
+      sessions.engine.interruptAll();
+      ctx.send(202, { shuttingDown: true });
+      setTimeout(async () => {
+        try { await manager.stopAll(); } catch { /* exiting anyway */ }
+        process.exit(0);
+      }, 150);
+    }),
+
     // ---- environments -----------------------------------------------------
     route('POST', '/environments', async (ctx) => {
       try {

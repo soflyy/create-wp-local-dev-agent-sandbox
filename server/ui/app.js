@@ -80,7 +80,7 @@ function StatusDot({ status }) {
   return html`<span class="dot ${status}" title=${status}></span>`;
 }
 
-const TRANSIENT_ENV = ['scaffolding', 'setting-up', 'configuring', 'starting-worker', 'destroying'];
+const TRANSIENT_ENV = ['scaffolding', 'setting-up', 'configuring', 'destroying'];
 
 function EnvRow({ env, onAction }) {
   const building = TRANSIENT_ENV.includes(env.status);
@@ -595,6 +595,7 @@ function HealthBar({ pct, tone }) {
 function HealthModal({ onClose }) {
   const [h, setH] = useState(null);
   const [err, setErr] = useState('');
+  const [ctrlMsg, setCtrlMsg] = useState('');
   useEffect(() => {
     let stop = false;
     const tick = async () => {
@@ -611,6 +612,23 @@ function HealthModal({ onClose }) {
   const dfRow = (t) => (h && h.docker.df ? h.docker.df.find((r) => r.Type === t) : null);
   const m = h && h.memory, c = h && h.cpu, dsk = h && h.disk, est = h && h.estimate;
   const load1 = c ? c.loadavg[0] : 0;
+
+  const interruptAll = async () => {
+    if (!confirm('Interrupt ALL running Claude turns now? (Environments stay up.)')) return;
+    try { const r = await api('/control/interrupt-all', { method: 'POST' }); setCtrlMsg(`Interrupted ${r.interrupted} session(s).`); }
+    catch (e) { setCtrlMsg(`Failed: ${e.message}`); }
+  };
+  const stopAll = async () => {
+    if (!confirm('Stop ALL environments (containers down)? Running Claude turns are interrupted too.')) return;
+    setCtrlMsg('Stopping all environments…');
+    try { const r = await api('/control/stop-all', { method: 'POST' }); setCtrlMsg(`Stopped ${r.stopped.length} environment(s).`); }
+    catch (e) { setCtrlMsg(`Failed: ${e.message}`); }
+  };
+  const shutdown = async () => {
+    if (!confirm('Shut down EVERYTHING — interrupt Claude, stop all containers, and exit the server process? You will have to restart it from the terminal.')) return;
+    setCtrlMsg('Shutting down — stopping all environments and exiting the server…');
+    try { await api('/control/shutdown', { method: 'POST' }); } catch { /* the server is exiting; the request may not return */ }
+  };
 
   return html`
     <div class="modal-bg" onClick=${onClose}>
@@ -657,6 +675,15 @@ function HealthModal({ onClose }) {
               </tbody>
             </table>`}
         `}
+        <div class="health-controls">
+          <div class="section-head"><span>Controls</span></div>
+          <div class="ctrl-row">
+            <button class="btn small ghost" onClick=${interruptAll}>Interrupt all sessions</button>
+            <button class="btn small warn" onClick=${stopAll}>Stop all environments</button>
+            <button class="btn small danger-btn" onClick=${shutdown}>Shut down server</button>
+          </div>
+          ${ctrlMsg && html`<div class="muted small ctrl-msg">${ctrlMsg}</div>`}
+        </div>
         <div class="modal-foot"><button class="btn ghost" onClick=${onClose}>Close</button></div>
       </div>
     </div>`;

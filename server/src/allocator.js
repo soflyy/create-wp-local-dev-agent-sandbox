@@ -102,13 +102,10 @@ export async function allocate(registry, config, { nameHint } = {}) {
       createdAt: new Date().toISOString(),
       setupStartedAt: null,
       setupFinishedAt: null,
-      workerStartedAt: null,
       lastError: null,
       // Setup log lives OUTSIDE the env dir (the scaffolder requires an empty
-      // target dir). Worker log is written inside the container at this path,
-      // visible on the host at <dir>/workspace/.worker.log.
+      // target dir).
       setupLogPath: join(config.dataDir, 'logs', `${name}.log`),
-      workerLogPath: '/home/node/.worker.log',
     };
     data.environments[id] = record;
     return record;
