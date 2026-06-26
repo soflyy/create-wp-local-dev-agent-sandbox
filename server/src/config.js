@@ -26,16 +26,10 @@ function parseRange(raw, fallback) {
 }
 
 export function loadConfig(env = process.env) {
-  const missing = [];
-  if (!env.CURSOR_API_KEY) missing.push('CURSOR_API_KEY');
-  if (!env.GITHUB_TOKEN) missing.push('GITHUB_TOKEN');
-  if (missing.length) {
-    throw new Error(
-      `Missing required env: ${missing.join(', ')}. ` +
-        `These are the shared Cursor + GitHub credentials applied to every environment.`,
-    );
-  }
-
+  // Credentials (GitHub + Claude tokens, WP admin defaults) are managed on the
+  // Settings page now and stored in data/settings.json — env vars only SEED that
+  // file on first run, so none are required to boot. (DEVBOX_API_TOKEN is the
+  // exception — it gates this very API, so it must be set before start.)
   const dataDir = abs(env.DEVBOX_DATA_DIR, join(SERVER_ROOT, 'data'));
 
   const config = {
@@ -51,6 +45,11 @@ export function loadConfig(env = process.env) {
     envsDir: abs(env.DEVBOX_ENVS_DIR, join(dataDir, 'envs')),
     registryPath: join(dataDir, 'registry.json'),
     presetsPath: join(dataDir, 'presets.json'),
+    settingsPath: join(dataDir, 'settings.json'),
+    // Server-scoped XDG_CONFIG_HOME handed to the scaffolder so the WP-admin
+    // defaults from Settings seed new sites WITHOUT touching the operator's real
+    // ~/.config/create-wp-local-dev-agent-sandbox/config.json.
+    scaffolderConfigHome: join(dataDir, 'xdg'),
     // Scratch space where the server materializes a create's setup-script /
     // defines files to hand the scaffolder as --setup-script / --defines paths.
     // The scaffolder copies their contents into the project (scripts/user-setup.sh
@@ -63,9 +62,12 @@ export function loadConfig(env = process.env) {
     buildConcurrency: Math.max(1, parseInt(env.BUILD_CONCURRENCY || '2', 10)),
     reconcileIntervalMs: parseInt(env.RECONCILE_INTERVAL_MS || '45000', 10),
 
-    // Credentials (shared across all environments)
-    cursorApiKey: env.CURSOR_API_KEY,
-    githubToken: env.GITHUB_TOKEN,
+    // Cursor key stays env-sourced (optional; the worker reads it). GitHub +
+    // Claude tokens are managed in Settings — these env values only seed the
+    // settings file on first run.
+    cursorApiKey: env.CURSOR_API_KEY || null,
+    seedGithubToken: env.GITHUB_TOKEN || '',
+    seedClaudeToken: env.CLAUDE_CODE_OAUTH_TOKEN || '',
     gitAuthorName: env.GIT_AUTHOR_NAME || 'devbox',
     gitAuthorEmail: env.GIT_AUTHOR_EMAIL || 'devbox@localhost',
 
@@ -112,7 +114,8 @@ export function loadConfig(env = process.env) {
     );
   }
 
-  // The set of secret strings the logger must redact.
-  config.secrets = [config.cursorApiKey, config.githubToken].filter(Boolean);
+  // Initial secret strings for the log redactor (env-seeded). Tokens managed in
+  // Settings are added to the redactor after the settings store loads.
+  config.secrets = [config.cursorApiKey, config.seedGithubToken, config.seedClaudeToken].filter(Boolean);
   return Object.freeze(config);
 }

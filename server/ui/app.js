@@ -480,6 +480,72 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
     </div>`;
 }
 
+function SettingsModal({ onClose, onLogout }) {
+  const [s, setS] = useState(null);
+  const [ghToken, setGh] = useState('');
+  const [clToken, setCl] = useState('');
+  const [wpUser, setWpUser] = useState('');
+  const [wpEmail, setWpEmail] = useState('');
+  const [wpPass, setWpPass] = useState('');
+  const [err, setErr] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try { const d = await api('/settings'); setS(d); setWpUser(d.wpAdminUser || ''); setWpEmail(d.wpAdminEmail || ''); }
+      catch (e) { setErr(e.message); }
+    })();
+  }, []);
+
+  const hint = (f) => (s && s[f] && s[f].set ? `configured ${s[f].hint} · leave blank to keep` : 'not set');
+  const save = async () => {
+    setBusy(true); setErr(''); setSaved(false);
+    try {
+      const body = { wpAdminUser: wpUser, wpAdminEmail: wpEmail };
+      if (ghToken) body.githubToken = ghToken;
+      if (clToken) body.claudeToken = clToken;
+      if (wpPass) body.wpAdminPassword = wpPass;
+      const d = await api('/settings', { method: 'PUT', body: JSON.stringify(body) });
+      setS(d); setGh(''); setCl(''); setWpPass(''); setSaved(true);
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  return html`
+    <div class="modal-bg" onClick=${onClose}>
+      <div class="modal" onClick=${(e) => e.stopPropagation()}>
+        <h3>Settings</h3>
+        ${!s && !err && html`<div class="muted">Loading…</div>`}
+        ${s && html`
+          <p class="muted small">Saved on the server (<code>data/settings.json</code>). Tokens are write-only — set or replace them here; they're never shown back.</p>
+          <label>GitHub token <span class="muted small">— ${hint('githubToken')}</span>
+            <input type="password" value=${ghToken} placeholder="ghp_… / github_pat_…" onInput=${(e) => setGh(e.target.value)} />
+          </label>
+          <label>Claude token <span class="muted small">— ${hint('claudeToken')}</span>
+            <input type="password" value=${clToken} placeholder="sk-ant-oat… (from claude setup-token)" onInput=${(e) => setCl(e.target.value)} />
+          </label>
+          <label>WordPress admin username
+            <input value=${wpUser} onInput=${(e) => setWpUser(e.target.value)} />
+          </label>
+          <label>WordPress admin password <span class="muted small">— ${hint('wpAdminPassword')}</span>
+            <input type="password" value=${wpPass} placeholder="leave blank to keep" onInput=${(e) => setWpPass(e.target.value)} />
+          </label>
+          <label>WordPress admin email
+            <input value=${wpEmail} onInput=${(e) => setWpEmail(e.target.value)} />
+          </label>
+          <p class="muted small">Token changes apply to newly-created environments and new Claude turns. WP-admin defaults seed new sites.</p>`}
+        ${err && html`<div class="err-msg">${err}</div>`}
+        ${saved && html`<div class="ok-msg">Saved.</div>`}
+        <div class="modal-foot">
+          <button class="lnk" onClick=${onLogout} title="Forget the API token on this device">Log out</button>
+          <span class="spacer"></span>
+          <button class="btn ghost" onClick=${onClose}>Close</button>
+          <button class="btn" onClick=${save} disabled=${!s || busy}>${busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 function TokenGate({ onSave }) {
   const [val, setVal] = useState(token.get());
   return html`
@@ -503,6 +569,7 @@ function App() {
   const [logEnvId, setLogEnvId] = useState(null);
   const [needToken, setNeedToken] = useState(false);
   const [authed, setAuthed] = useState(!!token.get());
+  const [showSettings, setShowSettings] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -561,7 +628,7 @@ function App() {
     <div class=${`layout ${selected ? 'has-selection' : ''}`}>
       <${Sidebar} sessions=${sessions} envs=${envs} selectedId=${selectedId}
         onSelect=${setSelectedId} onNewEnv=${() => setShowNewEnv(true)}
-        onEnvAction=${envAction} onSettings=${() => setAuthed(false)} onDeleteSession=${deleteSession} />
+        onEnvAction=${envAction} onSettings=${() => setShowSettings(true)} onDeleteSession=${deleteSession} />
       ${selected
         ? html`<${SessionView} session=${selected} key=${selected.id} onChanged=${refresh} onBack=${() => setSelectedId(null)} onDelete=${() => deleteSession(selected)} />`
         : html`<section class="main empty"><div class="muted">
@@ -572,6 +639,8 @@ function App() {
       ${newSession && html`<${NewSessionModal} envs=${envs} preselect=${newSession.preselect} onClose=${() => setNewSession(null)} onCreate=${createSession} />`}
       ${showNewEnv && html`<${NewEnvModal} presets=${presets} onClose=${() => setShowNewEnv(false)} onCreate=${createEnv} onSavePreset=${savePreset} onDeletePreset=${deletePreset} />`}
       ${logEnvId && logEnv && html`<${LogViewer} env=${logEnv} onClose=${() => setLogEnvId(null)} />`}
+      ${showSettings && html`<${SettingsModal} onClose=${() => setShowSettings(false)}
+        onLogout=${() => { token.set(''); setShowSettings(false); setAuthed(false); setNeedToken(true); }} />`}
     </div>`;
 }
 
