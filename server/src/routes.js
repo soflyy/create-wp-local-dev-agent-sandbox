@@ -72,7 +72,15 @@ export function buildRoutes(config, registry, manager, sessions, presets) {
     // ---- environments -----------------------------------------------------
     route('POST', '/environments', async (ctx) => {
       try {
-        const provision = normalizeProvision(ctx.body.provision);
+        // Compose any selected presets (in order) with optional custom fields.
+        const presetIds = Array.isArray(ctx.body.presetIds) ? ctx.body.presetIds : [];
+        const selected = presetIds.map((pid) => {
+          const p = presets.get(pid);
+          if (!p) throw httpErr(400, `unknown preset "${pid}"`);
+          return p;
+        });
+        const custom = normalizeProvision(ctx.body.provision);
+        const provision = composeProvision(selected, custom);
         const prompt = typeof ctx.body.prompt === 'string' ? ctx.body.prompt.trim() : '';
         const model = typeof ctx.body.model === 'string' && ctx.body.model.trim() ? ctx.body.model.trim() : undefined;
         const record = await manager.createEnvironment({ name: ctx.body.name, provision, prompt: prompt || undefined, model });
@@ -237,12 +245,46 @@ function validatePreset(body = {}) {
   return { name, description: typeof body.description === 'string' ? body.description : '', ...validateProvisionFields(body) };
 }
 
-// Provision for a create: same fields, plus an optional presetName for display.
-// Returns null when nothing was specified (a blank WordPress env).
+// Custom (ad-hoc) provision fields for a create. Returns null when nothing was
+// specified (a blank WordPress env, or presets-only).
 function normalizeProvision(body) {
   if (!body || typeof body !== 'object') return null;
   const { setupScript, devScript, activate, defines } = validateProvisionFields(body);
   if (!setupScript && !devScript && !activate.length && !Object.keys(defines).length) return null;
-  const presetName = typeof body.presetName === 'string' && body.presetName.trim() ? body.presetName.trim() : null;
-  return { setupScript, devScript, activate, defines, presetName };
+  return { setupScript, devScript, activate, defines };
+}
+
+// Compose selected presets (in order) + optional custom fields into one provision:
+// setup scripts run sequentially, dev scripts run concurrently in the single dev
+// container, defines merge (later wins), activate lists concatenate (deduped).
+// Returns null when there's nothing to provision. Exported for testing.
+export function composeProvision(presets, custom) {
+  const parts = presets.map((p) => ({
+    label: p.name, setupScript: p.setupScript, devScript: p.devScript, defines: p.defines, activate: p.activate,
+  }));
+  if (custom) parts.push({ label: 'Custom', ...custom });
+  if (!parts.length) return null;
+
+  const setupChunks = parts
+    .filter((p) => p.setupScript && p.setupScript.trim())
+    .map((p) => `# ===== ${p.label} =====\n${p.setupScript.trim()}\n`);
+  const setupScript = setupChunks.length
+    ? `#!/usr/bin/env bash\nset -euo pipefail\n\n${setupChunks.join('\n')}`
+    : '';
+
+  const devs = parts.filter((p) => p.devScript && p.devScript.trim());
+  let devScript = '';
+  if (devs.length === 1) devScript = devs[0].devScript;
+  else if (devs.length > 1) {
+    devScript = '#!/usr/bin/env bash\n# composed dev scripts — run concurrently in one dev container\n'
+      + devs.map((d) => `# --- ${d.label} ---\n(\n${d.devScript.trim()}\n) &`).join('\n')
+      + '\nwait\n';
+  }
+
+  const defines = Object.assign({}, ...parts.map((p) => p.defines || {}));
+  const activate = [];
+  for (const p of parts) for (const s of p.activate || []) if (!activate.includes(s)) activate.push(s);
+
+  if (!setupScript && !devScript && !activate.length && !Object.keys(defines).length) return null;
+  return { setupScript, devScript, defines, activate, presetName: presets.map((p) => p.name).join(' + ') || null };
 }

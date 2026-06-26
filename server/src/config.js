@@ -38,11 +38,6 @@ export function loadConfig(env = process.env) {
 
   const dataDir = abs(env.DEVBOX_DATA_DIR, join(SERVER_ROOT, 'data'));
 
-  // Target repo defaults to Agent Connector for WP; empty string disables it.
-  const DEFAULT_TARGET_REPO = 'https://github.com/soflyy/agent-connector-for-wp.git';
-  const targetRepo = (env.TARGET_REPO !== undefined ? env.TARGET_REPO : DEFAULT_TARGET_REPO).trim();
-  const targetPluginSlug = env.TARGET_PLUGIN_SLUG || 'agent-connector-for-wp';
-
   const config = {
     // HTTP
     port: parseInt(env.DEVBOX_PORT || '4000', 10),
@@ -74,18 +69,10 @@ export function loadConfig(env = process.env) {
     gitAuthorName: env.GIT_AUTHOR_NAME || 'devbox',
     gitAuthorEmail: env.GIT_AUTHOR_EMAIL || 'devbox@localhost',
 
-    // Target plugin repo: each environment replaces the release-zip plugin with
-    // a live git checkout (cloned into the workspace, composer-installed, and
-    // symlinked into wp-content/plugins) so the worker operates on — and commits
-    // to — the real repo. Set TARGET_REPO="" to disable (general-purpose worker).
-    targetRepo: targetRepo || null,
-    targetRepoRef: env.TARGET_REPO_REF || null, // branch/tag/commit, optional
-    targetPluginSlug,
-    targetPluginSubdir: env.TARGET_PLUGIN_SUBDIR || 'plugin', // plugin lives in repo/<subdir>
-
-    // Worker launch tuning. When a target repo is set, the worker operates inside
-    // the checkout by default (so its git context is the repo); else the home dir.
-    workerDir: env.WORKER_DIR || (targetRepo ? `/home/node/${targetPluginSlug}` : '/home/node'),
+    // Worker launch tuning. The worker operates from the home dir by default
+    // (provisioning — incl. checking out a plugin repo — is done by presets now;
+    // set WORKER_DIR to point the worker at a specific checkout if desired).
+    workerDir: env.WORKER_DIR || '/home/node',
     workerIdleReleaseTimeout: env.WORKER_IDLE_RELEASE_TIMEOUT || null, // seconds, optional
     // Worker health endpoint, bound inside the container (not published to the
     // host — no host port consumed). Used for liveness via `curl /readyz`, since

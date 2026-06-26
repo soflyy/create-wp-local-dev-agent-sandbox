@@ -14,18 +14,34 @@ cd "$(dirname "$0")/.."
 
 # Install the gateway from its latest release zip (vendor/ + mcp-adapter baked
 # in, so no composer step). --force reinstalls cleanly on re-run.
-echo "→ Installing Agent Connector for WP (MCP gateway)…"
-docker compose exec -T workspace wp plugin install \
-  https://github.com/soflyy/agent-connector-for-wp/releases/latest/download/agent-connector-for-wp.zip \
-  --force --activate
+#
+# Guard: if agent-connector-for-wp is already active, a setup script (e.g. a
+# "develop from a git checkout" preset) put its own copy in place — keep it
+# rather than clobbering the checkout with the release zip. The companion +
+# options below still run (idempotent, and apply to either copy).
+if docker compose exec -T workspace wp plugin is-active agent-connector-for-wp >/dev/null 2>&1; then
+  echo "→ Agent Connector for WP already active (git checkout from a setup script) — keeping it, skipping the release-zip install."
+else
+  echo "→ Installing Agent Connector for WP (MCP gateway)…"
+  docker compose exec -T workspace wp plugin install \
+    https://github.com/soflyy/agent-connector-for-wp/releases/latest/download/agent-connector-for-wp.zip \
+    --force --activate
+fi
 
-# Install the Default Abilities companion (the built-in abilities now live here).
+# Install the Universal Abilities companion (the built-in abilities live here).
 # It declares `Requires Plugins: agent-connector-for-wp`, so the gateway must be
-# active first (it is, above). Pinned `default-abilities-plugin` release tag.
-echo "→ Installing the Default Abilities companion…"
-docker compose exec -T workspace wp plugin install \
-  https://github.com/soflyy/agent-connector-for-wp/releases/download/default-abilities-plugin/default-abilities-plugin.zip \
-  --force --activate
+# active first (it is, above). Pinned `universal-abilities-plugin` release tag.
+#
+# Guard (same as the gateway above): keep a git checkout placed by a setup script
+# rather than clobbering it with the release zip.
+if docker compose exec -T workspace wp plugin is-active universal-abilities-plugin >/dev/null 2>&1; then
+  echo "→ Universal Abilities already active (git checkout from a setup script) — keeping it, skipping the release-zip install."
+else
+  echo "→ Installing the Universal Abilities companion…"
+  docker compose exec -T workspace wp plugin install \
+    https://github.com/soflyy/agent-connector-for-wp/releases/download/universal-abilities-plugin/universal-abilities-plugin.zip \
+    --force --activate
+fi
 
 # Switch it on. Two options set directly — the equivalent of the Connection
 # screen's checkboxes — fine here: a trusted, throwaway dev sandbox marked
@@ -36,4 +52,4 @@ echo "→ Enabling the gateway and exposing the built-in abilities over MCP…"
 docker compose exec -T workspace wp option update agent_connector_for_wp_enabled 1 >/dev/null
 docker compose exec -T workspace wp option update agent_connector_for_wp_builtin_abilities 1 >/dev/null
 
-echo "✓ Agent Connector for WP + Default Abilities enabled (shell, WP-CLI, PHP eval, filesystem) over MCP."
+echo "✓ Agent Connector for WP + Universal Abilities enabled (shell, WP-CLI, PHP eval, filesystem) over MCP."

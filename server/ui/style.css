@@ -118,6 +118,16 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .modal textarea.mono { resize: vertical; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .modal .row { display: flex; gap: 8px; align-items: center; }
 .modal .row select, .modal .row input { flex: 1; }
+.preset-list { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 4px; border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px; max-height: 200px; overflow-y: auto; }
+.preset-item { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; }
+.preset-item:hover { background: var(--panel2); }
+.preset-check { display: flex; align-items: center; gap: 8px; margin: 0; flex: 1; cursor: pointer; color: var(--text); }
+.preset-check input { width: auto; }
+.preset-name { font-weight: 600; }
+.preset-item .sess-del, .preset-item .lnk.danger { margin-left: auto; }
+.custom-prov { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+.custom-prov summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .modal .save-preset { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
 .modal .save-preset .btn { white-space: nowrap; }
 .modal.logs { width: 820px; }

@@ -377,7 +377,7 @@ function LogViewer({ env, onClose }) {
 function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset }) {
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
-  const [presetId, setPresetId] = useState('');
+  const [presetIds, setPresetIds] = useState([]); // selected preset ids, in check order
   const [setupScript, setSetupScript] = useState('');
   const [devScript, setDevScript] = useState('');
   const [definesText, setDefinesText] = useState('');
@@ -386,19 +386,11 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Load a saved preset's fields into the form (still editable before create).
-  const loadPreset = (id) => {
-    setPresetId(id);
-    const p = presets.find((x) => x.id === id);
-    if (!p) { setSetupScript(''); setDevScript(''); setDefinesText(''); setActivateText(''); return; }
-    setSetupScript(p.setupScript || '');
-    setDevScript(p.devScript || '');
-    setDefinesText(p.defines && Object.keys(p.defines).length ? JSON.stringify(p.defines, null, 2) : '');
-    setActivateText((p.activate || []).join(', '));
-  };
+  const togglePreset = (id) => setPresetIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
-  // Parse the form into a provision object, or throw a friendly error.
-  const buildProvision = () => {
+  // Parse the custom fields into a provision object (applied on top of presets),
+  // or throw a friendly error. Returns null when no custom fields are set.
+  const buildCustom = () => {
     let defines = {};
     const dt = definesText.trim();
     if (dt) {
@@ -408,71 +400,77 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
       defines = parsed;
     }
     const activate = activateText.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
-    const sel = presets.find((x) => x.id === presetId);
-    return { setupScript, devScript, defines, activate, presetName: sel ? sel.name : null };
+    if (!setupScript.trim() && !devScript.trim() && !dt && !activate.length) return null;
+    return { setupScript, devScript, defines, activate };
   };
-  const isEmpty = !setupScript.trim() && !devScript.trim() && !definesText.trim() && !activateText.trim();
 
   const create = async () => {
     setErr('');
     let provision;
-    try { provision = isEmpty ? undefined : buildProvision(); } catch (e) { setErr(e.message); return; }
+    try { provision = buildCustom(); } catch (e) { setErr(e.message); return; }
     setBusy(true);
-    try { await onCreate(name.trim() || undefined, provision, prompt.trim() || undefined); } catch (e) { setErr(e.message); setBusy(false); }
+    try { await onCreate(name.trim() || undefined, provision || undefined, prompt.trim() || undefined, presetIds); }
+    catch (e) { setErr(e.message); setBusy(false); }
   };
   const savePreset = async () => {
     setErr('');
     const nm = presetName.trim();
-    if (!nm) { setErr('Enter a name to save this as a preset.'); return; }
-    let provision;
-    try { provision = buildProvision(); } catch (e) { setErr(e.message); return; }
-    try {
-      const p = await onSavePreset({ name: nm, setupScript: provision.setupScript, devScript: provision.devScript, defines: provision.defines, activate: provision.activate });
-      setPresetId(p.id); setPresetName('');
-    } catch (e) { setErr(e.message); }
+    if (!nm) { setErr('Enter a name to save the custom fields as a preset.'); return; }
+    let custom;
+    try { custom = buildCustom(); } catch (e) { setErr(e.message); return; }
+    if (!custom) { setErr('Fill in at least one custom field to save as a preset.'); return; }
+    try { await onSavePreset({ name: nm, ...custom }); setPresetName(''); }
+    catch (e) { setErr(e.message); }
   };
-  const deletePreset = async () => {
-    const p = presets.find((x) => x.id === presetId);
+  const deletePreset = async (id) => {
+    const p = presets.find((x) => x.id === id);
     if (!p || !confirm(`Delete preset "${p.name}"?`)) return;
-    try { await onDeletePreset(p.id); setPresetId(''); } catch (e) { setErr(e.message); }
+    try { await onDeletePreset(id); setPresetIds((prev) => prev.filter((x) => x !== id)); } catch (e) { setErr(e.message); }
   };
 
   return html`
     <div class="modal-bg" onClick=${onClose}>
       <div class="modal wide" onClick=${(e) => e.stopPropagation()}>
         <h3>New environment</h3>
-        <p class="muted">Builds a fresh WordPress devbox (≈1 min) with the target plugin checked out. Leave everything below blank for a plain site, or provision it with a setup script, wp-config defines, and plugins to activate — saved as reusable presets in this browser's server.</p>
+        <p class="muted">Builds a fresh WordPress devbox (≈1 min). Compose one or more presets, and/or add custom provisioning below. Leave it all blank for a plain site.</p>
         <label>Name (optional)
           <input value=${name} placeholder="my-devbox (a-z, 0-9, -)" onInput=${(e) => setName(e.target.value)} />
         </label>
         <label>First prompt <span class="muted small">— optional; once the env is ready, a Claude session starts with this</span>
           <textarea rows="3" value=${prompt} placeholder="e.g. Add a custom field to the Oxygen builder and verify it renders." onInput=${(e) => setPrompt(e.target.value)}></textarea>
         </label>
-        <label>Preset
-          <div class="row">
-            <select value=${presetId} onChange=${(e) => loadPreset(e.target.value)}>
-              <option value="">— None (custom) —</option>
-              ${presets.map((p) => html`<option value=${p.id} key=${p.id}>${p.name}</option>`)}
-            </select>
-            ${presetId && html`<button class="btn small ghost danger" onClick=${deletePreset} title="Delete this preset">Delete</button>`}
-          </div>
-        </label>
-        <label>Setup script <span class="muted small">— runs once in the workspace as <code>node</code> (cwd /home/node, WordPress at ./wp)</span>
-          <textarea class="mono" rows="6" value=${setupScript} placeholder=${'#!/usr/bin/env bash\nset -euo pipefail\ncd /home/node\ngh repo clone owner/repo\n…'} onInput=${(e) => setSetupScript(e.target.value)}></textarea>
-        </label>
-        <label>Dev script <span class="muted small">— long-running; runs in its own <code>dev</code> container for as long as the stack is up (watchers/builds)</span>
-          <textarea class="mono" rows="3" value=${devScript} placeholder=${'#!/usr/bin/env bash\ncd /home/node/breakdance\nnpm run dev:codespace'} onInput=${(e) => setDevScript(e.target.value)}></textarea>
-        </label>
-        <label>wp-config defines <span class="muted small">— JSON object; booleans/numbers become raw PHP literals</span>
-          <textarea class="mono" rows="4" value=${definesText} placeholder=${'{\n  "WP_DEBUG": true,\n  "WP_MEMORY_LIMIT": "512M"\n}'} onInput=${(e) => setDefinesText(e.target.value)}></textarea>
-        </label>
-        <label>Activate plugins <span class="muted small">— slugs, in order, comma-separated</span>
-          <input value=${activateText} placeholder="oxygen-elements, breakdance-elements, breakdance-main" onInput=${(e) => setActivateText(e.target.value)} />
-        </label>
-        <div class="row save-preset">
-          <input value=${presetName} placeholder="Save these as a preset named…" onInput=${(e) => setPresetName(e.target.value)} />
-          <button class="btn small ghost" onClick=${savePreset} disabled=${!presetName.trim()}>Save preset</button>
+        <label>Presets <span class="muted small">— compose any number; applied in the order you check them</span></label>
+        <div class="preset-list">
+          ${presets.length === 0 && html`<div class="muted small pad">No saved presets yet.</div>`}
+          ${presets.map((p) => html`
+            <div class="preset-item" key=${p.id}>
+              <label class="preset-check">
+                <input type="checkbox" checked=${presetIds.includes(p.id)} onChange=${() => togglePreset(p.id)} />
+                <span class="preset-name">${p.name}</span>
+                ${p.description && html`<span class="muted small">${p.description}</span>`}
+              </label>
+              <button class="lnk danger small" title="Delete preset" onClick=${() => deletePreset(p.id)}>✕</button>
+            </div>`)}
         </div>
+        <details class="custom-prov">
+          <summary>Custom provisioning (optional, applied after presets)</summary>
+          <label>Setup script <span class="muted small">— runs once in the workspace as <code>node</code> (cwd /home/node, WordPress at ./wp)</span>
+            <textarea class="mono" rows="5" value=${setupScript} placeholder=${'#!/usr/bin/env bash\nset -euo pipefail\ncd /home/node\ngh repo clone owner/repo\n…'} onInput=${(e) => setSetupScript(e.target.value)}></textarea>
+          </label>
+          <label>Dev script <span class="muted small">— long-running; runs in the <code>dev</code> container for as long as the stack is up</span>
+            <textarea class="mono" rows="3" value=${devScript} placeholder=${'#!/usr/bin/env bash\ncd /home/node/breakdance\nnpm run dev:codespace'} onInput=${(e) => setDevScript(e.target.value)}></textarea>
+          </label>
+          <label>wp-config defines <span class="muted small">— JSON object; booleans/numbers become raw PHP literals</span>
+            <textarea class="mono" rows="3" value=${definesText} placeholder=${'{\n  "WP_DEBUG": true,\n  "WP_MEMORY_LIMIT": "512M"\n}'} onInput=${(e) => setDefinesText(e.target.value)}></textarea>
+          </label>
+          <label>Activate plugins <span class="muted small">— slugs, in order, comma-separated</span>
+            <input value=${activateText} placeholder="oxygen-elements, breakdance-elements" onInput=${(e) => setActivateText(e.target.value)} />
+          </label>
+          <div class="row save-preset">
+            <input value=${presetName} placeholder="Save these custom fields as a preset named…" onInput=${(e) => setPresetName(e.target.value)} />
+            <button class="btn small ghost" onClick=${savePreset} disabled=${!presetName.trim()}>Save preset</button>
+          </div>
+        </details>
         ${err && html`<div class="err-msg">${err}</div>`}
         <div class="modal-foot">
           <button class="btn ghost" onClick=${onClose}>Cancel</button>
@@ -524,8 +522,8 @@ function App() {
     const s = await api(`/environments/${envId}/sessions`, { method: 'POST', body: JSON.stringify({ prompt, model }) });
     setNewSession(null); await refresh(); setSelectedId(s.id);
   };
-  const createEnv = async (name, provision, prompt) => {
-    await api('/environments', { method: 'POST', body: JSON.stringify({ name, provision, prompt }) });
+  const createEnv = async (name, provision, prompt, presetIds) => {
+    await api('/environments', { method: 'POST', body: JSON.stringify({ name, provision, prompt, presetIds }) });
     setShowNewEnv(false); refresh();
   };
   const savePreset = async (preset) => {

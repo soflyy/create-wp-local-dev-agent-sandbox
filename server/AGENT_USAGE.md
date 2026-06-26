@@ -11,11 +11,13 @@ one gives you:
   to it from GitHub (comment `@cursor <name> …` on an issue/PR) or the Cursor
   dashboard.
 
-By default each environment also checks out a **target plugin repo** as a live
-git working copy (cloned into the workspace, `composer install`-ed, and symlinked
-into `wp-content/plugins` so it runs live in WordPress) — the worker operates on
-that repo and commits/pushes to it. The default is Agent Connector for WP at
-`/home/node/agent-connector-for-wp`; the operator can change or disable it.
+An environment is provisioned by the **presets** chosen when it's created
+(composable — pick several). A preset can run a setup script (e.g. clone a plugin
+repo as a live git checkout, `composer install` it, symlink it into
+`wp-content/plugins`, activate it), run a long-running dev/watch script, set
+wp-config defines, and activate plugins in order. A built-in **Agent Connector
+(dev)** preset checks out `agent-connector-for-wp` from git for the agent to work
+on; **Oxygen** builds Breakdance/Oxygen from source.
 
 You do **not** need a special client — every action is an HTTP request you can
 make with `curl` (or any HTTP library).
