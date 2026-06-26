@@ -11,7 +11,6 @@ import { allocate } from './allocator.js';
 import * as docker from './docker.js';
 import * as workerMod from './worker.js';
 import * as gitauth from './gitauth.js';
-import * as agentConnector from './agent-connector.js';
 import * as fleet from './fleet.js';
 import { computeStatus, coreUp, publicView } from './status.js';
 import { log, redact } from './log.js';
@@ -126,12 +125,12 @@ export class Manager {
       if (provisionPlan) await rm(provisionPlan.scratchDir, { recursive: true, force: true }).catch(() => {});
       await registry.update(record.id, { setupFinishedAt: new Date().toISOString() });
 
-      // 2. Git auth (non-fatal), then swap the target plugin to a live git
-      //    checkout (fatal — that's the env's purpose).
+      // 2. Configure GitHub auth + git identity in the workspace (non-fatal),
+      //    so an agent can clone/commit/push. (Provisioning — incl. swapping a
+      //    plugin for a git checkout — is done by presets during setup now.)
       this.jobs.set(record.id, 'configuring');
       await registry.update(record.id, { status: 'configuring' });
       await gitauth.configure(record, config);
-      await agentConnector.setup(record, config);
 
       // 3. Optionally start the named Cursor worker.
       if (config.cursorWorkerAutostart) {

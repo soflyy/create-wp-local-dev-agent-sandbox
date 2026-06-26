@@ -62,6 +62,45 @@ cd /home/node/breakdance
 npm run dev:codespace
 `;
 
+// Agent Connector (dev): replace the release-zip gateway the scaffolder installs
+// with a live git checkout of the repo, so an agent develops the real plugin.
+// Runs as a setup script (cwd /home/node); the scaffolder's install-agent-connector.sh
+// then sees it already active and keeps the checkout instead of reinstalling the
+// release. gh uses the GH_TOKEN/GITHUB_TOKEN forwarded into the workspace.
+const AGENT_CONNECTOR_SETUP_SCRIPT = `#!/usr/bin/env bash
+set -euo pipefail
+SLUG=agent-connector-for-wp
+DEST=/home/node/$SLUG
+PLUGIN_DIR=/home/node/wp/wp-content/plugins/$SLUG
+
+# Drop any release-zip copy, then check out the repo (idempotent: update if present).
+wp plugin delete "$SLUG" >/dev/null 2>&1 || true
+if [ -d "$DEST/.git" ]; then
+  git -C "$DEST" fetch --all --prune
+else
+  rm -rf "$DEST"
+  gh repo clone soflyy/agent-connector-for-wp "$DEST"
+fi
+
+# vendor/ is gitignored — composer install in the plugin subdir.
+if [ -f "$DEST/plugin/composer.json" ]; then
+  composer install --no-dev --no-interaction --no-progress -d "$DEST/plugin"
+fi
+
+# Symlink the plugin subdir into wp-content and activate the checkout.
+rm -rf "$PLUGIN_DIR"
+ln -s "$DEST/plugin" "$PLUGIN_DIR"
+wp plugin activate "$SLUG"
+
+# If the repo ships a skill installer, link its skill(s) into the agents' dirs (non-fatal).
+SKILL_INSTALLER="$DEST/abilities-generator/scripts/install-skill.sh"
+if [ -f "$SKILL_INSTALLER" ]; then
+  ( cd "$DEST/abilities-generator" && bash scripts/install-skill.sh ) || echo "  (claude skill install failed; continuing)"
+  ( cd "$DEST/abilities-generator" && CLAUDE_SKILLS_DIR=/home/node/.cursor/skills bash scripts/install-skill.sh ) || echo "  (cursor skill install failed; continuing)"
+fi
+echo "✓ agent-connector-for-wp now served from the git checkout at $DEST"
+`;
+
 const SEED_PRESETS = [
   {
     name: 'Oxygen',
@@ -70,6 +109,14 @@ const SEED_PRESETS = [
     defines: OXYGEN_DEFINES,
     activate: ['oxygen-elements', 'breakdance-elements', 'breakdance-main'],
     devScript: OXYGEN_DEV_SCRIPT,
+  },
+  {
+    name: 'Agent Connector (dev)',
+    description: 'Develop agent-connector-for-wp from a live git checkout (replaces the release-zip gateway).',
+    setupScript: AGENT_CONNECTOR_SETUP_SCRIPT,
+    defines: {},
+    activate: [],
+    devScript: '',
   },
 ];
 
