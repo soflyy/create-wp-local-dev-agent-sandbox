@@ -83,6 +83,28 @@ RUN curl https://cursor.com/install -fsS | bash \
 COPY bin/cursor-wp-mcp-helper /usr/local/bin/cursor-wp-mcp-helper
 RUN chmod 0755 /usr/local/bin/cursor-wp-mcp-helper
 
+# dev-supervisor: the entrypoint for the optional 'dev' container (see
+# docker-compose.override.yml). Keeps a project's dev script running for as long
+# as the stack is up — waits until the script exists and is non-empty (it may be
+# empty until the setup script populates a checkout), runs it, and restarts it
+# with a short backoff if it exits, so a watcher that dies (or a path that isn't
+# there yet) self-heals. Baked into the image so it's on the PATH for the dev
+# service, which reuses this same image.
+RUN printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -uo pipefail' \
+  'SCRIPT="${1:-/home/node/.dev-script.sh}"' \
+  'echo "[dev] supervising $SCRIPT"' \
+  'until [ -s "$SCRIPT" ]; do echo "[dev] waiting for $SCRIPT to be ready…"; sleep 3; done' \
+  'while true; do' \
+  '  echo "[dev] ▶ running dev script"' \
+  '  bash "$SCRIPT" || echo "[dev] dev script exited with code $?"' \
+  '  echo "[dev] restarting in 5s (stop with: npm run stop)"' \
+  '  sleep 5' \
+  'done' \
+  > /usr/local/bin/dev-supervisor \
+  && chmod 0755 /usr/local/bin/dev-supervisor
+
 # Run as the image's built-in non-root user (uid 1000) so
 # `claude --dangerously-skip-permissions` is allowed (it refuses to run as root).
 USER node
