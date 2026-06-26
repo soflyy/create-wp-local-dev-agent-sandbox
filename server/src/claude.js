@@ -18,10 +18,11 @@ import { log, redact } from './log.js';
 const CLAUDE_CWD = '/home/node'; // in-workspace.sh runs claude here (container WORKDIR)
 
 export class ClaudeEngine {
-  constructor(config, store, bus) {
+  constructor(config, store, bus, settings) {
     this.config = config;
     this.store = store;
     this.bus = bus;
+    this.settings = settings;
     this.active = new Map(); // sessionId -> { child, ndjson }
   }
 
@@ -85,7 +86,12 @@ export class ClaudeEngine {
     this.bus.publish(session.id, promptEvt);
 
     // stdin ignored → in-workspace.sh sees a non-TTY → adds -T → clean stream-json.
-    const child = spawn('bash', args, { cwd: env.dir, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    // Inject the Claude token from Settings (if set) so in-workspace.sh resolves
+    // CLAUDE_CODE_OAUTH_TOKEN from it; otherwise it falls back to the host's env /
+    // ~/.agent-sandbox/oauth-token exactly as before.
+    const claudeToken = this.settings && this.settings.get().claudeToken;
+    const childEnv = claudeToken ? { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: claudeToken } : process.env;
+    const child = spawn('bash', args, { cwd: env.dir, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     const entry = { child, ndjson, interrupting: false };
     this.active.set(session.id, entry);
 

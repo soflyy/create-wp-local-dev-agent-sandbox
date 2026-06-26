@@ -36,11 +36,25 @@ class Semaphore {
 }
 
 export class Manager {
-  constructor(config, registry) {
+  constructor(config, registry, settings) {
     this.config = config;
     this.registry = registry;
+    this.settings = settings;
     this.jobs = new Map(); // id -> transient state string
     this.buildSem = new Semaphore(config.buildConcurrency);
+  }
+
+  // Write the WP-admin defaults from Settings into a server-scoped
+  // XDG_CONFIG_HOME config.json that the scaffolder reads (seeds each new site's
+  // admin account). Kept out of the operator's real ~/.config.
+  async _writeScaffolderConfig() {
+    const s = this.settings.get();
+    const dir = join(this.config.scaffolderConfigHome, 'create-wp-local-dev-agent-sandbox');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, 'config.json'),
+      JSON.stringify({ wpAdminUser: s.wpAdminUser, wpAdminPassword: s.wpAdminPassword, wpAdminEmail: s.wpAdminEmail }, null, 2),
+    );
   }
 
   // ---- create -------------------------------------------------------------
@@ -105,6 +119,7 @@ export class Manager {
       //    Bounded by the build semaphore; output captured to the setup log.
       this.jobs.set(record.id, 'setting-up');
       await registry.update(record.id, { status: 'setting-up', setupStartedAt: new Date().toISOString() });
+      await this._writeScaffolderConfig(); // seed WP-admin defaults for the scaffolder
       const scaffoldArgs = [
         join(config.scaffolderDir, 'index.js'),
         record.dir,
@@ -116,6 +131,7 @@ export class Manager {
           logPath: record.setupLogPath,
           truncate: true,
           timeout: 30 * 60 * 1000,
+          env: { XDG_CONFIG_HOME: config.scaffolderConfigHome },
         }),
       );
       // The scaffolder has copied the provisioning inputs into the project
@@ -130,7 +146,7 @@ export class Manager {
       //    plugin for a git checkout — is done by presets during setup now.)
       this.jobs.set(record.id, 'configuring');
       await registry.update(record.id, { status: 'configuring' });
-      await gitauth.configure(record, config);
+      await gitauth.configure(record, config, this.settings.get().githubToken);
 
       // 3. Optionally start the named Cursor worker.
       if (config.cursorWorkerAutostart) {
@@ -201,7 +217,7 @@ export class Manager {
     this.jobs.set(record.id, 'starting-worker');
     try {
       await docker.npmRun(record, 'start', { timeout: 600_000 }); // up -d --build (cached)
-      await gitauth.configure(record, this.config);
+      await gitauth.configure(record, this.config, this.settings.get().githubToken);
       if (this.config.cursorWorkerAutostart) await workerMod.start(record, this.config);
       await this.registry.update(record.id, {
         status: 'running',
@@ -269,7 +285,7 @@ export class Manager {
         const alive = await workerMod.isRunning(record, this.config);
         if (!alive && record.status !== 'stopped') {
           log.info(`[${record.name}] worker not running but stack is up — relaunching`);
-          await gitauth.configure(record, this.config);
+          await gitauth.configure(record, this.config, this.settings.get().githubToken);
           await workerMod.start(record, this.config);
           await this.registry.update(record.id, { status: 'running', workerStartedAt: new Date().toISOString() });
         } else if (alive && record.status !== 'running') {

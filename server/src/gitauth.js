@@ -23,12 +23,16 @@ const SCRIPT = [
   'git config --global user.email "$GIT_AUTHOR_EMAIL"',
 ].join(' && ');
 
-export async function configure(env, config) {
+export async function configure(env, config, githubToken) {
+  if (!githubToken) {
+    log.warn(`[${env.name}] no GitHub token set (Settings) — skipping git auth; clone/push of private repos will fail.`);
+    return false;
+  }
   try {
     await exec(env, 'workspace', ['sh', '-lc', SCRIPT], {
       envNames: ['DEVBOX_GH_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL'],
       envValues: {
-        DEVBOX_GH_TOKEN: config.githubToken,
+        DEVBOX_GH_TOKEN: githubToken,
         GIT_AUTHOR_NAME: config.gitAuthorName,
         GIT_AUTHOR_EMAIL: config.gitAuthorEmail,
       },

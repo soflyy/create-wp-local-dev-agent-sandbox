@@ -114,6 +114,8 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
   border: 1px solid var(--line); border-radius: 8px; padding: 9px; font: inherit; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .err-msg { color: var(--red); margin-top: 10px; font-size: 13px; }
+.ok-msg { color: var(--green); margin-top: 10px; font-size: 13px; }
+.modal-foot .spacer { flex: 1; }
 .modal.wide { width: 560px; max-height: 90vh; overflow-y: auto; }
 .modal textarea.mono { resize: vertical; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .modal .row { display: flex; gap: 8px; align-items: center; }

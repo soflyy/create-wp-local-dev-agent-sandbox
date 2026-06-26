@@ -7,9 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 import { loadConfig } from './config.js';
-import { initLog, log } from './log.js';
+import { initLog, addSecrets, log } from './log.js';
 import { Registry } from './registry.js';
 import { PresetStore } from './presets.js';
+import { SettingsStore } from './settings.js';
 import { Manager } from './manager.js';
 import { SessionStore } from './sessions.js';
 import { SessionBus } from './sessionbus.js';
@@ -38,13 +39,19 @@ async function main() {
 
   const registry = await new Registry(config.registryPath).load();
   const presets = await new PresetStore(config.presetsPath).load();
-  const manager = new Manager(config, registry);
+  // Mutable settings (tokens + WP-admin defaults), seeded from env on first run.
+  const settings = await new SettingsStore(config.settingsPath, {
+    githubToken: config.seedGithubToken,
+    claudeToken: config.seedClaudeToken,
+  }).load();
+  addSecrets(settings.secrets()); // redact the stored tokens from logs too
+  const manager = new Manager(config, registry, settings);
 
   // Claude session subsystem.
   const sessionStore = await new SessionStore(config.sessionsPath).load();
   await sessionStore.reconcile(); // running → interrupted (resumable; jsonl persists)
   const sessionBus = new SessionBus(config.sessionRingBufferSize);
-  const claudeEngine = new ClaudeEngine(config, sessionStore, sessionBus);
+  const claudeEngine = new ClaudeEngine(config, sessionStore, sessionBus, settings);
   const sessions = { store: sessionStore, engine: claudeEngine, bus: sessionBus };
 
   // When an env finishes provisioning, optionally kick off its initial session
@@ -55,7 +62,7 @@ async function main() {
     log.info(`[${env.name}] started initial session ${s.id}`);
   };
 
-  const routes = buildRoutes(config, registry, manager, sessions, presets);
+  const routes = buildRoutes(config, registry, manager, sessions, presets, settings);
   const server = createServer(config, routes);
 
   server.listen(config.port, config.bind, () => {

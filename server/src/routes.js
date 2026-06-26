@@ -3,12 +3,13 @@
 
 import { readFile, rm } from 'node:fs/promises';
 import { route } from './http.js';
+import { addSecrets } from './log.js';
 import { hostInfo } from './docker.js';
 import { AllocationError } from './allocator.js';
 import { openSse } from './sse.js';
 import { makeStaticHandler } from './static.js';
 
-export function buildRoutes(config, registry, manager, sessions, presets) {
+export function buildRoutes(config, registry, manager, sessions, presets, settings) {
   const staticHandler = makeStaticHandler(config.uiRoot);
 
   const envOr404 = (ctx) => {
@@ -106,6 +107,14 @@ export function buildRoutes(config, registry, manager, sessions, presets) {
       for (const s of sessions.store.listByEnv(env.id)) await deleteSession(s);
       await manager.destroy(env);
       ctx.send(200, { deleted: true });
+    }),
+
+    // ---- settings (tokens + WP-admin defaults; secrets masked in responses) --
+    route('GET', '/settings', async (ctx) => ctx.send(200, settings.publicView())),
+    route('PUT', '/settings', async (ctx) => {
+      const view = await settings.update(ctx.body || {});
+      addSecrets(settings.secrets()); // keep the log redactor current
+      ctx.send(200, view);
     }),
 
     // ---- provisioning presets (saved blueprints, stored in the data dir) ---

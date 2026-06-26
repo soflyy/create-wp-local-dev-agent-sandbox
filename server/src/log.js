@@ -14,6 +14,14 @@ export function initLog(secrets = []) {
   SECRETS = secrets.filter((s) => typeof s === 'string' && s.length >= 6);
 }
 
+// Merge more secret values into the redaction set at runtime (e.g. after a token
+// is changed on the Settings page), so they're scrubbed from subsequent logs.
+export function addSecrets(secrets = []) {
+  for (const s of secrets) {
+    if (typeof s === 'string' && s.length >= 6 && !SECRETS.includes(s)) SECRETS.push(s);
+  }
+}
+
 export function redact(value) {
   let s = typeof value === 'string' ? value : safeStringify(value);
   for (const secret of SECRETS) s = s.split(secret).join('***');
