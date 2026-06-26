@@ -12,7 +12,8 @@
   "files": [
     "index.js",
     "engine.js",
-    "templates"
+    "templates",
+    "examples"
   ],
   "engines": {
     "node": ">=18"

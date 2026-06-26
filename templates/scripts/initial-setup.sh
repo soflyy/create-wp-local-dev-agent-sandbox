@@ -28,6 +28,8 @@ done
 # Provisioning steps — each is an idempotent host-side script that runs WP-CLI
 # in the workspace container. Add more steps here as setup grows.
 bash scripts/install-wp.sh
+bash scripts/apply-defines.sh
+bash scripts/run-setup-script.sh
 bash scripts/install-plugins.sh
 bash scripts/install-agent-connector.sh
 bash scripts/connect-mcp.sh
