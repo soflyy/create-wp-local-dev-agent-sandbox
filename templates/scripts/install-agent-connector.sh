@@ -43,13 +43,18 @@ else
     --force --activate
 fi
 
-# Switch it on. Two options set directly — the equivalent of the Connection
-# screen's checkboxes — fine here: a trusted, throwaway dev sandbox marked
+# Switch it on. Options set directly — the equivalent of the Connection screen's
+# checkboxes — fine here: a trusted, throwaway dev sandbox marked
 # WP_ENVIRONMENT_TYPE=local (Claude already runs with --dangerously-skip-permissions):
 #   agent_connector_for_wp_enabled            → the gateway master switch
 #   agent_connector_for_wp_builtin_abilities  → "Expose the built-in abilities over MCP"
-echo "→ Enabling the gateway and exposing the built-in abilities over MCP…"
+#   agent_connector_for_wp_mcp_debug          → "Log MCP events" (records every MCP
+#       request incl. raw JSON-RPC bodies to the DB). Off by default in the plugin
+#       because bodies can hold sensitive data — but on by default here: these are
+#       throwaway debug sandboxes where the request log is exactly what you want.
+echo "→ Enabling the gateway, the built-in abilities, and MCP event logging…"
 docker compose exec -T workspace wp option update agent_connector_for_wp_enabled 1 >/dev/null
 docker compose exec -T workspace wp option update agent_connector_for_wp_builtin_abilities 1 >/dev/null
+docker compose exec -T workspace wp option update agent_connector_for_wp_mcp_debug 1 >/dev/null
 
-echo "✓ Agent Connector for WP + Universal Abilities enabled (shell, WP-CLI, PHP eval, filesystem) over MCP."
+echo "✓ Agent Connector for WP + Universal Abilities enabled (shell, WP-CLI, PHP eval, filesystem) over MCP, with MCP event logging on."
