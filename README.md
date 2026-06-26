@@ -16,9 +16,19 @@ npx create-wp-local-dev-agent-sandbox my-site
 # choose a host port (default 8080):
 npx create-wp-local-dev-agent-sandbox my-site --port=8090
 
+# run a setup script in the workspace, add wp-config constants, and activate
+# plugins (in order) it drops into wp-content — see "Customizing setup" below:
+npx create-wp-local-dev-agent-sandbox my-site \
+  --setup-script=./setup.sh \
+  --defines=./defines.json \
+  --activate=oxygen-elements,breakdance-elements,breakdance-main
+
 # just write files, don't touch Docker:
 npx create-wp-local-dev-agent-sandbox my-site --scaffold-only
 ```
+
+> Through `npm create`, put the flags after `--`, e.g.
+> `npm create wp-local-dev-agent-sandbox@latest my-site -- --port=8090`.
 
 Docker must be running. When it finishes you have a live site at **http://localhost:8080** — log in at `/wp-admin` with `admin` / `password` (the default; configurable in `.env` via `WP_ADMIN_USER` / `WP_ADMIN_PASSWORD`). Then:
 
@@ -43,15 +53,68 @@ my-site/
 ├── .env                    # DB creds + WP_PORT
 ├── .gitignore              # ignores the bind-mounted data dirs
 ├── package.json            # the npm-scripts UX (setup/start/stop/bash/claude/cursor/wp/reset)
-├── sandbox.config.json     # plugins to install on `npm run setup` (+ future params)
+├── sandbox.config.json     # plugins to install, wp-config defines, setup script & activation order for `npm run setup`
 ├── php/php.ini             # custom PHP overrides for the wordpress container (upload limits, etc.)
-├── scripts/                # provisioning steps run by initial-setup.sh (install-wp, plugins, root-for-agents, mcp, skills) + in-workspace.sh (credential-resolving launcher for bash/claude/cursor)
+├── scripts/                # provisioning steps run by initial-setup.sh (install-wp, defines, user setup script, plugins, agent-connector, mcp, skills) + in-workspace.sh (credential-resolving launcher for bash/claude/cursor)
 ├── bin/                    # cursor-wp-mcp-helper — Node CLI for the WordPress MCP server, baked onto the workspace PATH
 ├── skills/                 # agent skills installed into the workspace (wordpress-dev, cursor-wp-mcp-helper) — copied to both ~/.claude/skills and ~/.cursor/skills
 └── README.md
 ```
 
 WordPress data, the database, and the workspace home are bind-mounted into `wp/`, `db/`, and `workspace/` in the project, so everything is visible on your machine and survives restarts.
+
+## Customizing setup
+
+Beyond the bundled plugins, you can run your own setup script, add `wp-config.php` constants, and activate plugins in a chosen order. All three are flags on the create command and are persisted into the project's `sandbox.config.json`, so they re-run on `npm run setup` (and `npm run reset`) — the project stays self-contained.
+
+```bash
+npx create-wp-local-dev-agent-sandbox my-site \
+  --port=8090 \
+  --setup-script=./setup.sh \
+  --defines=./defines.json \
+  --activate=oxygen-elements,breakdance-elements,breakdance-main
+```
+
+On the first `npm run setup` these run **in order**: install WordPress → apply `--defines` → run `--setup-script` → install bundled `plugins` and activate the `--activate` list. So a plugin your script drops into `wp-content` exists by the time it's activated.
+
+- **`--setup-script=PATH`** — a shell script run **inside the workspace container as `node`** — the same environment `npm run bash` gives you, with the working directory at `/home/node` and WordPress at `/home/node/wp`. Use it to clone a repo and run its installer, build a plugin/theme, seed content, etc. It's piped in over stdin, so `gh repo clone <repo>` lands a checkout right next to `./wp`. `npm run setup` may run it again, so guard side effects (e.g. skip a clone when the directory already exists). To clone a **private** repo, authenticate `gh` once inside (`npm run bash` → `gh auth login`; it persists in `workspace/`), or export `GH_TOKEN` on your host before setup — it's forwarded into the container.
+
+- **`--defines=PATH`** — a JSON file of `{ "WP_CONST": value }` pairs written into `wp-config.php` as constants via `wp config set`, which places them correctly (above the "stop editing" marker) and updates them in place on re-run. Booleans and numbers become raw PHP literals (`define( 'WP_DEBUG', true )`); strings are quoted (`define( 'WP_MEMORY_LIMIT', '512M' )`). Use `{ "value": "...", "raw": true }` to force a raw (unquoted) value.
+
+  ```json
+  {
+    "WP_DEBUG": true,
+    "WP_MEMORY_LIMIT": "512M"
+  }
+  ```
+
+  > **Why key:value rather than a raw `wp-config` snippet?** You don't have to worry about *where* in the file each `define()` lands or about duplicating one that already exists — `wp config set` handles placement and is idempotent.
+
+- **`--activate=a,b,c`** — plugin slugs to activate, in this exact order, **after** the setup script. This is for plugins that are already present (e.g. dropped into `wp-content` by your script) — there's nothing to download, just activate. For plugins installed from wordpress.org or a `.zip`, use `plugins` in `sandbox.config.json` (see below) instead.
+
+A worked example (Breakdance) lives in [`examples/`](examples/).
+
+### `sandbox.config.json`
+
+The flags above just write into this file; you can also edit it directly and `npm run reset`:
+
+```json
+{
+  "plugins": [
+    "ai",
+    { "source": "akismet", "activate": false, "version": "5.3" },
+    { "source": "https://example.com/plugin.zip", "activate": true }
+  ],
+  "defines": { "WP_DEBUG": true, "WP_MEMORY_LIMIT": "512M" },
+  "setupScript": "scripts/user-setup.sh",
+  "activate": ["oxygen-elements", "breakdance-elements", "breakdance-main"]
+}
+```
+
+- `plugins` — installed (and activated unless `"activate": false`) from a wordpress.org slug or a URL/path to a `.zip`. `version` is optional (slugs only).
+- `defines` — `wp-config.php` constants (see `--defines` above).
+- `setupScript` — project-relative path to the script run in the workspace (`--setup-script` copies your file here as `scripts/user-setup.sh`).
+- `activate` — slugs activated in order, after `setupScript` (see `--activate` above).
 
 ## Requirements
 
@@ -118,6 +181,22 @@ This package is also a library. If you ship a WordPress plugin (or a stack of th
    They get the full sandbox (WordPress + Claude Code + Cursor CLI + the WordPress & Playwright MCP servers + Root for Agents) **plus your plugins**, installed and activated on the first `npm run setup`.
 
 Your preset's plugins are **appended** to the defaults, so `mcp-adapter` and `root-for-agents` are always present. Everything else — templates, Docker setup, the `npm run …` UX — is inherited from this package, so improvements here flow to every `create-<brand>` that depends on it.
+
+A preset can also carry the same customizations as the CLI flags above — they're merged into the generated `sandbox.config.json` (and combine with anything the end user passes):
+
+```js
+create({
+  preset: {
+    name: 'breakdance-wp',
+    plugins: [{ source: 'https://example.com/breakdance.zip', activate: true }],
+    defines: { WP_DEBUG: true, WP_MEMORY_LIMIT: '512M' },
+    activate: ['oxygen-elements', 'breakdance-elements', 'breakdance-main'],
+    setupScript: 'set -euo pipefail\ncd /home/node\n# …clone/build/seed here…\n',
+  },
+});
+```
+
+`setupScript` here is the script's **contents** (a string), written into the project as `scripts/user-setup.sh`. A user's `--setup-script=PATH` overrides it.
 
 > **Premium plugins:** a *public* `create-<brand>` can only bake in a `.zip` URL that's publicly reachable. For licensed plugins, point at a gated endpoint you control, or have your wrapper read the URL from a prompt or an env var instead of hardcoding it.
 

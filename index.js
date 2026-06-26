@@ -7,8 +7,8 @@
  * and plugin install). Pass --scaffold-only to write files and skip Docker.
  *
  * Usage:
- *   npm create wp-local-dev-agent-sandbox -- [dir] [--port=8080] [--scaffold-only]
- *   npx create-wp-local-dev-agent-sandbox [dir] [--port=8080] [--scaffold-only]
+ *   npm create wp-local-dev-agent-sandbox -- [dir] [--port=8080] [--setup-script=PATH] [--defines=PATH] [--activate=a,b,c] [--scaffold-only]
+ *   npx create-wp-local-dev-agent-sandbox [dir] [--port=8080] [--setup-script=PATH] [--defines=PATH] [--activate=a,b,c] [--scaffold-only]
  *
  * The scaffolding logic lives in engine.js, which is also exported for
  * downstream `create-<brand>` packages — see the README.
