@@ -19,4 +19,4 @@
 # (setup still running) it simply retries until /home/node/breakdance exists.
 set -euo pipefail
 
-cd /home/node/breakdance && npm run dev
+cd /home/node/breakdance && npm run dev:codespace
