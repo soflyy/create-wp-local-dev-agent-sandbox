@@ -16,6 +16,7 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 /* sidebar */
 .sidebar { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .side-head { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid var(--line); }
+.side-head-btns { display: flex; gap: 6px; }
 .side-list { overflow-y: auto; flex: 1; }
 .side-section { border-bottom: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .side-section.grow { flex: 1; }
@@ -143,6 +144,23 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 /* preset badge on an env row */
 .badge { font-size: 10px; text-transform: uppercase; letter-spacing: .03em; color: var(--accent);
   background: var(--accent2); border-radius: 99px; padding: 1px 7px; flex: none; }
+
+/* system health */
+.modal.health { width: 660px; }
+.hrow { display: grid; grid-template-columns: 92px 130px 1fr; align-items: center; gap: 12px; margin: 10px 0; font-size: 13px; }
+.hlabel { color: var(--muted); }
+.hval { color: var(--text); }
+.hval.wide-val { grid-column: 2 / 4; }
+.hbar { height: 8px; background: var(--panel2); border-radius: 99px; overflow: hidden; }
+.hbar-fill { height: 100%; background: var(--green); transition: width .3s; }
+.hbar-fill.warn { background: var(--amber); }
+.hbar-fill.bad { background: var(--red); }
+.health-callout { margin: 14px 0 8px; padding: 10px 12px; border: 1px solid var(--line);
+  border-left: 3px solid var(--accent); border-radius: 8px; background: var(--panel2); font-size: 13px; }
+.health-callout.bad { border-left-color: var(--red); }
+.health-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px; }
+.health-table th { text-align: left; color: var(--muted); font-weight: 600; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+.health-table td { padding: 5px 8px; border-bottom: 1px solid var(--line); }
 
 /* ---- mobile / narrow screens -------------------------------------------- */
 @media (max-width: 760px) {

@@ -4,7 +4,8 @@
 import { readFile, rm } from 'node:fs/promises';
 import { route } from './http.js';
 import { addSecrets } from './log.js';
-import { hostInfo, exec } from './docker.js';
+import { exec } from './docker.js';
+import { systemHealth } from './health.js';
 import { AllocationError } from './allocator.js';
 import { openSse } from './sse.js';
 import { makeStaticHandler } from './static.js';
@@ -60,14 +61,8 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
     route('GET', '/health', async (ctx) => ctx.send(200, { ok: true, version: 1 })),
 
     route('GET', '/host', async (ctx) => {
-      const info = await hostInfo();
-      ctx.send(200, {
-        ...info,
-        environments: registry.list().length,
-        sessions: sessions.store.list().length,
-        maxEnvironments: config.maxEnvironments,
-        loadavg: (await import('node:os')).loadavg(),
-      });
+      const h = await systemHealth(config, registry);
+      ctx.send(200, { ...h, sessions: sessions.store.list().length });
     }),
 
     // ---- environments -----------------------------------------------------
