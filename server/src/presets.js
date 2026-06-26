@@ -30,7 +30,10 @@ cd /home/node
 if [ ! -d /home/node/breakdance ]; then
   gh repo clone soflyy/breakdance
 fi
-cd /home/node/breakdance && ./scripts/setup.sh --wp-root=/home/node/wp
+# no-plugin-activate (soflyy/breakdance#9441): build + symlink, but DON'T let
+# setup.sh activate every breakdance plugin — the preset's own \`activate\` list
+# decides which ones go live (oxygen-elements, breakdance-elements, breakdance-main).
+cd /home/node/breakdance && ./scripts/setup.sh --wp-root=/home/node/wp no-plugin-activate
 `;
 
 const OXYGEN_DEFINES = {
