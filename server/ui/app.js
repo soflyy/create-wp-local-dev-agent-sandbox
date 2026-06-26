@@ -115,10 +115,12 @@ function SessionItem({ s, selectedId, onSelect, onDelete }) {
   return html`
     <div class=${`sess ${s.id === selectedId ? 'active' : ''}`} onClick=${() => onSelect(s.id)}>
       <div class="sess-top">
-        <${StatusDot} status=${s.status} /> <span class="sess-title">${s.title || s.id}</span>
+        <${StatusDot} status=${s.status} />
+        <span class="sess-title">${s.title || s.id}</span>
+        <span class="sess-time" title=${`last active ${fullTime(s.lastActivityAt)}`}>${fmtAgo(s.lastActivityAt)}</span>
         <button class="sess-del lnk danger" title="Delete session" onClick=${(e) => { e.stopPropagation(); onDelete(s); }}>✕</button>
       </div>
-      <div class="sess-sub muted">${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
+      <div class="sess-sub muted">started ${fmtAgo(s.createdAt, true)} · ${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
     </div>`;
 }
 
@@ -144,7 +146,9 @@ function Sidebar({ sessions, envs, selectedId, onSelect, onNewEnv, onEnvAction, 
         <div class="side-list">
           ${envs.length === 0 && html`<div class="muted pad small">No environments — create one.</div>`}
           ${envs.map((e) => {
-            const envSessions = sessions.filter((s) => s.envId === e.id);
+            const envSessions = sessions
+              .filter((s) => s.envId === e.id)
+              .sort((a, b) => String(b.lastActivityAt || '').localeCompare(String(a.lastActivityAt || '')));
             const open = expanded.has(e.id) || e.id === selEnvId;
             return html`
               <div class="env-group" key=${e.id}>
@@ -262,6 +266,9 @@ function SessionView({ session, onChanged, onBack, onDelete }) {
           ${session.envName} · ${session.model || 'default model'} · $${(session.costUsd || 0).toFixed(4)}
           ${session.claudeSessionId && html`· <code title="claude session id">${session.claudeSessionId.slice(0, 8)}</code>`}
         </div>
+        <div class="bar-meta muted" title=${`started ${fullTime(session.createdAt)}\nlast active ${fullTime(session.lastActivityAt)}`}>
+          started ${fmtAgo(session.createdAt, true)} · last active ${fmtAgo(session.lastActivityAt, true)}
+        </div>
       </header>
       ${session.sshResumeHint && html`<div class="ssh muted" onClick=${() => navigator.clipboard?.writeText(session.sshResumeHint)} title="click to copy">SSH resume: <code>${session.sshResumeHint}</code></div>`}
       <div class="transcript" ref=${scroller}>
@@ -319,6 +326,24 @@ function fmtDur(ms) {
   if (!ms || ms < 0) ms = 0;
   const s = Math.floor(ms / 1000), m = Math.floor(s / 60);
   return m ? `${m}m ${s % 60}s` : `${s}s`;
+}
+
+// Relative time. Compact ("3m","2h","3d","Jun 26") or long ("3m ago","on Jun 26").
+function fmtAgo(iso, long = false) {
+  const t = Date.parse(iso || '');
+  if (isNaN(t)) return '';
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 45) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)}m${long ? ' ago' : ''}`;
+  if (s < 86400) return `${Math.round(s / 3600)}h${long ? ' ago' : ''}`;
+  if (s < 7 * 86400) return `${Math.round(s / 86400)}d${long ? ' ago' : ''}`;
+  const d = new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return long ? `on ${d}` : d;
+}
+// Full timestamp for hover/title.
+function fullTime(iso) {
+  const t = Date.parse(iso || '');
+  return isNaN(t) ? '' : new Date(t).toLocaleString();
 }
 
 function LogViewer({ env, onClose }) {
