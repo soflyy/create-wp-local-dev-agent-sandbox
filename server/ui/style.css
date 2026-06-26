@@ -100,6 +100,20 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
   border: 1px solid var(--line); border-radius: 8px; padding: 9px; font: inherit; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .err-msg { color: var(--red); margin-top: 10px; font-size: 13px; }
+.modal.wide { width: 560px; max-height: 90vh; overflow-y: auto; }
+.modal textarea.mono { resize: vertical; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.modal .row { display: flex; gap: 8px; align-items: center; }
+.modal .row select, .modal .row input { flex: 1; }
+.modal .save-preset { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.modal .save-preset .btn { white-space: nowrap; }
+.modal.logs { width: 820px; }
+.logbox { margin-top: 8px; max-height: 62vh; overflow: auto; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px; color: var(--text); }
+.heartbeat { margin-top: 6px; display: flex; align-items: center; gap: 6px; }
+.heartbeat .pulse { color: var(--green); animation: blink 1.4s steps(2) infinite; }
+/* preset badge on an env row */
+.badge { font-size: 10px; text-transform: uppercase; letter-spacing: .03em; color: var(--accent);
+  background: var(--accent2); border-radius: 99px; padding: 1px 7px; flex: none; }
 
 /* ---- mobile / narrow screens -------------------------------------------- */
 @media (max-width: 760px) {

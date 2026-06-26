@@ -8,7 +8,7 @@ import { AllocationError } from './allocator.js';
 import { openSse } from './sse.js';
 import { makeStaticHandler } from './static.js';
 
-export function buildRoutes(config, registry, manager, sessions) {
+export function buildRoutes(config, registry, manager, sessions, presets) {
   const staticHandler = makeStaticHandler(config.uiRoot);
 
   const envOr404 = (ctx) => {
@@ -64,7 +64,8 @@ export function buildRoutes(config, registry, manager, sessions) {
     // ---- environments -----------------------------------------------------
     route('POST', '/environments', async (ctx) => {
       try {
-        const record = await manager.createEnvironment({ name: ctx.body.name });
+        const provision = normalizeProvision(ctx.body.provision);
+        const record = await manager.createEnvironment({ name: ctx.body.name, provision });
         ctx.send(202, { id: record.id, name: record.name, port: record.port, wpUrl: record.wpUrl, status: record.status });
       } catch (err) {
         if (err instanceof AllocationError) throw httpErr(err.status, err.message);
@@ -85,6 +86,22 @@ export function buildRoutes(config, registry, manager, sessions) {
       sessions.engine.killEnvSessions(env.id);
       for (const s of sessions.store.listByEnv(env.id)) await sessions.store.update(s.id, { status: 'env-destroyed' });
       await manager.destroy(env);
+      ctx.send(200, { deleted: true });
+    }),
+
+    // ---- provisioning presets (saved blueprints, stored in the data dir) ---
+    route('GET', '/presets', async (ctx) => ctx.send(200, { presets: presets.list() })),
+    route('POST', '/presets', async (ctx) => {
+      const rec = await presets.create(validatePreset(ctx.body));
+      ctx.send(201, rec);
+    }),
+    route('PUT', '/presets/:id', async (ctx) => {
+      const rec = await presets.update(ctx.params.id, validatePreset(ctx.body));
+      if (!rec) throw httpErr(404, `preset "${ctx.params.id}" not found`);
+      ctx.send(200, rec);
+    }),
+    route('DELETE', '/presets/:id', async (ctx) => {
+      if (!(await presets.remove(ctx.params.id))) throw httpErr(404, `preset "${ctx.params.id}" not found`);
       ctx.send(200, { deleted: true });
     }),
 
@@ -167,4 +184,49 @@ function httpErr(status, message) {
   const e = new Error(message);
   e.status = status;
   return e;
+}
+
+const SLUG_RE = /^[a-z0-9][a-z0-9._-]*$/i; // plugin slug
+const CONST_RE = /^[A-Za-z_][A-Za-z0-9_]*$/; // PHP constant name
+
+// Validate the activate list + defines map shared by provision and presets.
+// Throws 400 on a bad slug / constant name / defines shape.
+function validateProvisionFields(body = {}) {
+  const setupScript = typeof body.setupScript === 'string' ? body.setupScript : '';
+  const devScript = typeof body.devScript === 'string' ? body.devScript : '';
+
+  let activate = [];
+  if (body.activate != null) {
+    if (!Array.isArray(body.activate)) throw httpErr(400, 'activate must be an array of plugin slugs');
+    activate = body.activate.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim());
+    for (const s of activate) if (!SLUG_RE.test(s)) throw httpErr(400, `invalid plugin slug "${s}"`);
+  }
+
+  let defines = {};
+  if (body.defines != null) {
+    if (typeof body.defines !== 'object' || Array.isArray(body.defines)) {
+      throw httpErr(400, 'defines must be a JSON object of { "WP_CONST": value } pairs');
+    }
+    defines = body.defines;
+    for (const k of Object.keys(defines)) if (!CONST_RE.test(k)) throw httpErr(400, `invalid define name "${k}"`);
+  }
+
+  return { setupScript, devScript, activate, defines };
+}
+
+// A preset additionally carries name/description.
+function validatePreset(body = {}) {
+  const name = String((body && body.name) || '').trim();
+  if (!name) throw httpErr(400, 'preset name is required');
+  return { name, description: typeof body.description === 'string' ? body.description : '', ...validateProvisionFields(body) };
+}
+
+// Provision for a create: same fields, plus an optional presetName for display.
+// Returns null when nothing was specified (a blank WordPress env).
+function normalizeProvision(body) {
+  if (!body || typeof body !== 'object') return null;
+  const { setupScript, devScript, activate, defines } = validateProvisionFields(body);
+  if (!setupScript && !devScript && !activate.length && !Object.keys(defines).length) return null;
+  const presetName = typeof body.presetName === 'string' && body.presetName.trim() ? body.presetName.trim() : null;
+  return { setupScript, devScript, activate, defines, presetName };
 }
