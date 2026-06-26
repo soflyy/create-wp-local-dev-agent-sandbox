@@ -117,7 +117,8 @@ const SEED_PRESETS = [
     description: 'Breakdance builder, built from soflyy/breakdance (BREAKDANCE_MODE=breakdance).',
     setupScript: BREAKDANCE_SETUP_SCRIPT,
     defines: { BREAKDANCE_MODE: 'breakdance', ...BREAKDANCE_BASE_DEFINES },
-    activate: ['breakdance-main', 'breakdance-elements', 'breakdance-woocommerce'],
+    // Order matters: elements → main → woocommerce.
+    activate: ['breakdance-elements', 'breakdance-main', 'breakdance-woocommerce'],
     devScript: BREAKDANCE_DEV_SCRIPT,
   },
   {
@@ -125,7 +126,8 @@ const SEED_PRESETS = [
     description: 'Breakdance + the FutureLayer plugin, built from soflyy/breakdance.',
     setupScript: BREAKDANCE_SETUP_SCRIPT,
     defines: { BREAKDANCE_MODE: 'breakdance', ...BREAKDANCE_BASE_DEFINES },
-    activate: ['breakdance-main', 'breakdance-elements', 'breakdance-woocommerce', 'futurelayer-plugin'],
+    // Breakdance order, then breakdance-ai, then futurelayer-plugin.
+    activate: ['breakdance-elements', 'breakdance-main', 'breakdance-woocommerce', 'breakdance-ai', 'futurelayer-plugin'],
     devScript: BREAKDANCE_DEV_SCRIPT,
   },
   {
