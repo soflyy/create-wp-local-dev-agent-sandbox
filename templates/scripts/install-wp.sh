@@ -18,6 +18,8 @@ WP_PORT="${WP_PORT:-8080}"
 WP_ADMIN_USER="${WP_ADMIN_USER:-admin}"
 WP_ADMIN_PASSWORD="${WP_ADMIN_PASSWORD:-password}"
 WP_ADMIN_EMAIL="${WP_ADMIN_EMAIL:-admin@example.com}"
+# Site title — defaults to the project name (set at scaffold time), else a generic.
+WP_SITE_TITLE="${WP_SITE_TITLE:-WordPress Dev}"
 
 if docker compose exec -T workspace wp core is-installed >/dev/null 2>&1; then
   echo "✓ WordPress is already installed — nothing to do."
@@ -25,7 +27,7 @@ else
   echo "→ Installing WordPress…"
   docker compose exec -T workspace wp core install \
     --url="http://localhost:${WP_PORT}" \
-    --title="WordPress Dev" \
+    --title="${WP_SITE_TITLE}" \
     --admin_user="${WP_ADMIN_USER}" \
     --admin_password="${WP_ADMIN_PASSWORD}" \
     --admin_email="${WP_ADMIN_EMAIL}" \
