@@ -660,8 +660,14 @@ function App() {
   const envAction = async (action, env) => {
     if (action === 'admin-login') {
       // Open the tab synchronously (in the click gesture) so popup blockers allow
-      // it, then point it at the minted, host-rebased login URL.
+      // it, paint a loading page so it isn't a blank flash, then redirect it to
+      // the minted, host-rebased login URL. The API token stays in the POST
+      // header — it never appears in any URL.
       const w = window.open('', '_blank');
+      if (w) w.document.write(`<!doctype html><meta charset="utf-8"><title>Logging in…</title>`
+        + `<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;`
+        + `background:#0f1115;color:#8b91a3;font:15px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">`
+        + `Logging into ${env.name} wp-admin…</body>`);
       try {
         const { loginUrl } = await api(`/environments/${env.id}/admin-login`, { method: 'POST' });
         const u = new URL(loginUrl);
