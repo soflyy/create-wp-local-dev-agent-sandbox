@@ -61,10 +61,12 @@ export const AGENTS = {
     defaultModel: (config) => config.codexDefaultModel || null,
     resumeHint: (dir, sid) => `cd ${dir} && bash scripts/in-workspace.sh codex exec resume ${sid}`,
     buildArgs(session, prompt) {
-      const a = ['codex', 'exec'];
-      if (session.claudeSessionId) a.push('resume', session.claudeSessionId);
-      a.push('--json', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '-C', AGENT_CWD);
+      // exec-level flags (--json, -C, -m, sandbox bypass) MUST come before the
+      // `resume` subcommand — `codex exec resume` has a narrow option set and
+      // rejects them. So: codex exec <exec-flags> [resume <id>] <prompt>.
+      const a = ['codex', 'exec', '--json', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '-C', AGENT_CWD];
       if (session.model) a.push('-m', session.model);
+      if (session.claudeSessionId) a.push('resume', session.claudeSessionId);
       a.push(prompt);
       return a;
     },

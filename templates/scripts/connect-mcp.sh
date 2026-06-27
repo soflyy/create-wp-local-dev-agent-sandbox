@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Connect the workspace's agents (Claude Code and Cursor) to the MCP servers in
-# this sandbox, so both can use them out of the box. Idempotent — re-run safe.
+# Connect the workspace's agents (Claude Code, Codex, and Cursor) to the MCP
+# servers in this sandbox, so all can use them out of the box. Idempotent — re-run safe.
 # Run via `npm run setup`.
 #
 #   - wordpress: the site's MCP server (Agent Connector for WP, which bundles
@@ -102,6 +102,35 @@ else
   echo "⚠ Could not write ~/.cursor/mcp.json (is /home/node writable by the node user?)." >&2
   echo "  Skipping Cursor's MCP setup — Claude is registered and unaffected. Fix the" >&2
   echo "  workspace/ ownership (it must be uid 1000) and re-run: bash scripts/connect-mcp.sh" >&2
+fi
+
+# Codex (~/.codex/config.toml, via `codex mcp add`). Same servers as above. Skipped
+# when codex isn't installed (older env images); each add is non-fatal so a Codex
+# hiccup never breaks the Claude/Cursor setup. stdio for wordpress (--env), HTTP
+# (--url) for playwright.
+if command -v codex >/dev/null 2>&1; then
+  echo "→ Connecting Codex to the MCP servers (~/.codex/config.toml)…"
+  if [ "$HAS_WP" = "1" ]; then
+    codex mcp remove wordpress >/dev/null 2>&1 || true
+    if codex mcp add wordpress \
+      --env WP_API_URL="$WP_MCP_URL" \
+      --env WP_API_USERNAME="$ADMIN_USER" \
+      --env WP_API_PASSWORD="$APPPASS" \
+      --env OAUTH_ENABLED=false \
+      -- npx -y @automattic/mcp-wordpress-remote >/dev/null 2>&1; then
+      echo "  ✓ codex: wordpress"
+    else
+      echo "  ⚠ codex: 'mcp add wordpress' failed (continuing)" >&2
+    fi
+  fi
+  codex mcp remove playwright >/dev/null 2>&1 || true
+  if codex mcp add playwright --url "$PLAYWRIGHT_URL" >/dev/null 2>&1; then
+    echo "  ✓ codex: playwright"
+  else
+    echo "  ⚠ codex: 'mcp add playwright' failed (continuing)" >&2
+  fi
+else
+  echo "→ codex not installed in this env — skipping Codex MCP setup."
 fi
 EOF
 
