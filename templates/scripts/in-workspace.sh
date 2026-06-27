@@ -50,6 +50,13 @@ if [ -z "$CODEX_KEY" ] && [ -f "$CODEX_KEY_FILE" ]; then
   CODEX_KEY="$(tr -d '[:space:]' < "$CODEX_KEY_FILE")"
 fi
 
+# OpenCode (Zen gateway) API key: $OPENCODE_API_KEY, then the file.
+OPENCODE_KEY="${OPENCODE_API_KEY:-}"
+OPENCODE_KEY_FILE="${OPENCODE_API_KEY_FILE:-$HOME/.agent-sandbox/opencode-api-key}"
+if [ -z "$OPENCODE_KEY" ] && [ -f "$OPENCODE_KEY_FILE" ]; then
+  OPENCODE_KEY="$(tr -d '[:space:]' < "$OPENCODE_KEY_FILE")"
+fi
+
 # Only nudge about the credential for the agent actually being launched, so
 # `npm run bash` (and the other agent) stays quiet.
 case "${1:-}" in
@@ -76,12 +83,20 @@ case "${1:-}" in
       echo "  or 'export CODEX_API_KEY=<key>'." >&2
     fi
     ;;
+  opencode)
+    if [ -z "$OPENCODE_KEY" ]; then
+      echo "ℹ No OpenCode API key found (\$OPENCODE_API_KEY or $OPENCODE_KEY_FILE)." >&2
+      echo "  opencode (Zen) needs a key from opencode.ai/auth — save it to $OPENCODE_KEY_FILE" >&2
+      echo "  (one line), or 'export OPENCODE_API_KEY=<key>'." >&2
+    fi
+    ;;
 esac
 
 # Export so the values are inherited by the container via name-only -e (off argv).
 export CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_TOKEN"
 export CURSOR_API_KEY="$CURSOR_KEY"
 export CODEX_API_KEY="$CODEX_KEY"
+export OPENCODE_API_KEY="$OPENCODE_KEY"
 
 # Allocate a TTY only when we actually have one. Interactive use (`npm run claude`,
 # `npm run bash`) keeps its TTY; piped/headless callers (e.g. driving
@@ -94,4 +109,5 @@ exec docker compose exec $TTY_FLAG \
   -e CLAUDE_CODE_OAUTH_TOKEN \
   -e CURSOR_API_KEY \
   -e CODEX_API_KEY \
+  -e OPENCODE_API_KEY \
   workspace "$@"

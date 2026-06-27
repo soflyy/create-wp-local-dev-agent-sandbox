@@ -67,6 +67,7 @@ export function loadConfig(env = process.env) {
     seedGithubToken: env.GITHUB_TOKEN || '',
     seedClaudeToken: env.CLAUDE_CODE_OAUTH_TOKEN || '',
     seedCodexToken: env.CODEX_API_KEY || '',
+    seedOpencodeToken: env.OPENCODE_API_KEY || '',
     gitAuthorName: env.GIT_AUTHOR_NAME || 'devbox',
     gitAuthorEmail: env.GIT_AUTHOR_EMAIL || 'devbox@localhost',
 
@@ -83,6 +84,8 @@ export function loadConfig(env = process.env) {
     claudeDefaultModel: env.CLAUDE_DEFAULT_MODEL || 'opus',
     // Codex (OpenAI) default model. null → let `codex exec` use its own default.
     codexDefaultModel: env.CODEX_DEFAULT_MODEL || null,
+    // OpenCode (Zen gateway) default model, format opencode/<model>.
+    opencodeDefaultModel: env.OPENCODE_DEFAULT_MODEL || 'opencode/claude-sonnet-4-6',
     sessionRingBufferSize: parseInt(env.SESSION_RING_BUFFER || '500', 10),
   };
 
@@ -99,6 +102,6 @@ export function loadConfig(env = process.env) {
 
   // Initial secret strings for the log redactor (env-seeded). Tokens managed in
   // Settings are added to the redactor after the settings store loads.
-  config.secrets = [config.seedGithubToken, config.seedClaudeToken, config.seedCodexToken].filter(Boolean);
+  config.secrets = [config.seedGithubToken, config.seedClaudeToken, config.seedCodexToken, config.seedOpencodeToken].filter(Boolean);
   return Object.freeze(config);
 }

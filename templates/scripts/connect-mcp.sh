@@ -132,6 +132,46 @@ if command -v codex >/dev/null 2>&1; then
 else
   echo "→ codex not installed in this env — skipping Codex MCP setup."
 fi
+
+# OpenCode (~/.config/opencode/opencode.json). Merge the mcp section (preserving
+# other config). wordpress = local (stdio) with env; playwright = remote (http).
+# Skipped when opencode isn't installed; non-fatal.
+if command -v opencode >/dev/null 2>&1; then
+  echo "→ Connecting OpenCode to the MCP servers (~/.config/opencode/opencode.json)…"
+  if HAS_WP="$HAS_WP" APPPASS="$APPPASS" WP_API_USERNAME="$ADMIN_USER" WP_MCP_URL="$WP_MCP_URL" PLAYWRIGHT_URL="$PLAYWRIGHT_URL" node -e '
+    const fs = require("fs"), os = require("os"), path = require("path");
+    const dir = path.join(os.homedir(), ".config", "opencode");
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, "opencode.json");
+    let c = {};
+    try { c = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
+    c["$schema"] = "https://opencode.ai/config.json";
+    c.mcp = c.mcp || {};
+    if (process.env.HAS_WP === "1") {
+      c.mcp.wordpress = {
+        type: "local",
+        command: ["npx", "-y", "@automattic/mcp-wordpress-remote"],
+        environment: {
+          WP_API_URL: process.env.WP_MCP_URL,
+          WP_API_USERNAME: process.env.WP_API_USERNAME,
+          WP_API_PASSWORD: process.env.APPPASS,
+          OAUTH_ENABLED: "false",
+        },
+        enabled: true,
+      };
+    } else {
+      delete c.mcp.wordpress;
+    }
+    c.mcp.playwright = { type: "remote", url: process.env.PLAYWRIGHT_URL, enabled: true };
+    fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n");
+  '; then
+    echo "  ✓ opencode: wordpress + playwright"
+  else
+    echo "  ⚠ opencode: MCP config write failed (continuing)" >&2
+  fi
+else
+  echo "→ opencode not installed in this env — skipping OpenCode MCP setup."
+fi
 EOF
 
 echo "✓ Run 'npm run claude' or 'npm run cursor' and use the MCP servers right away."

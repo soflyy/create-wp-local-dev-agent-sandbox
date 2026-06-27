@@ -105,6 +105,59 @@ export const AGENTS = {
       return out;
     },
   },
+  opencode: {
+    label: 'OpenCode',
+    procMatch: 'opencode run', // cmdline prefix used to reap the in-container turn
+    settingsKey: 'opencodeToken',
+    tokenEnv: 'OPENCODE_API_KEY', // OpenCode Zen gateway key
+    defaultModel: (config) => config.opencodeDefaultModel || 'opencode/claude-sonnet-4-6',
+    resumeHint: (dir, sid) => `cd ${dir} && bash scripts/in-workspace.sh opencode run -s ${sid}`,
+    buildArgs(session, prompt) {
+      const a = ['opencode', 'run', '--format', 'json', '--dangerously-skip-permissions', '--dir', AGENT_CWD];
+      if (session.model) a.push('-m', session.model);
+      if (session.claudeSessionId) a.push('-s', session.claudeSessionId);
+      a.push(prompt);
+      return a;
+    },
+    // PROVISIONAL mapping. opencode `run --format json` emits {type, properties}
+    // events. Confirmed: error = {type:'error', sessionID, error:{data:{message},statusCode}}.
+    // Text/tool shapes (message.part.updated → properties.part) are best-effort and
+    // get tightened against a real capture. Text streams as growing parts → emit deltas;
+    // finalize on session.idle.
+    parseLine(line, pending) {
+      let evt;
+      try { evt = JSON.parse(line); } catch { return { records: [{ type: 'raw', text: line }] }; }
+      const out = { records: [] };
+      const p = evt.properties || {};
+      const part = p.part || evt.part || {};
+      const sid = evt.sessionID || p.sessionID || part.sessionID || (p.info && p.info.id);
+      if (sid) out.sessionId = sid;
+      const t = String(evt.type || '');
+      if (t === 'error' || t === 'session.error') {
+        out.errorText = String((evt.error && (evt.error.data?.message || evt.error.message || evt.error.name)) || p.error?.data?.message || 'opencode error');
+        out.records.push({ type: 'stderr', text: out.errorText });
+      } else if (t.startsWith('message.part') || t === 'part.updated') {
+        if (part.type === 'text' && typeof part.text === 'string') {
+          pending.oc = pending.oc || {};
+          const key = part.id || 'text';
+          const prev = pending.oc[key] || '';
+          if (part.text.length >= prev.length) {
+            const delta = part.text.slice(prev.length);
+            pending.oc[key] = part.text;
+            pending.ocLast = part.text;
+            out.result = part.text;
+            if (delta) out.records.push({ type: 'stream_event', event: { delta: { type: 'text_delta', text: delta } } });
+          }
+        } else if (part.type === 'tool') {
+          out.records.push({ type: 'assistant', message: { content: [{ type: 'tool_use', name: part.tool || 'tool', input: part.state || part }] } });
+        }
+      } else if (t === 'session.idle' || t === 'session.completed') {
+        if (pending.ocLast) out.records.push({ type: 'assistant', message: { content: [{ type: 'text', text: pending.ocLast }] } });
+        out.records.push({ type: 'result', result: pending.ocLast || '', total_cost_usd: 0 });
+      }
+      return out;
+    },
+  },
 };
 
 const agentFor = (name) => AGENTS[name] || AGENTS.claude;
@@ -115,7 +168,7 @@ for sig in TERM KILL; do
   for d in /proc/[0-9]*; do
     pid=\${d#/proc/}; [ "$pid" = "$self" ] && continue
     c=$(tr '\\0' ' ' < "$d/cmdline" 2>/dev/null)
-    case "$c" in "claude -p "*|"codex exec"*) kill -$sig "$pid" 2>/dev/null ;; esac
+    case "$c" in "claude -p "*|"codex exec"*|"opencode run"*) kill -$sig "$pid" 2>/dev/null ;; esac
   done
   [ "$sig" = TERM ] && sleep 1
 done`;
@@ -246,7 +299,7 @@ export class ClaudeEngine {
 
   // Parse one stdout line via the agent, record its events, capture state.
   _handleLine(session, agent, line, ndjson, pending) {
-    const { records = [], sessionId, result, addCost, errorText } = agent.parseLine(line);
+    const { records = [], sessionId, result, addCost, errorText } = agent.parseLine(line, pending);
     for (const rec of records) {
       ndjson.write(JSON.stringify(rec) + '\n');
       this.bus.publish(session.id, rec);

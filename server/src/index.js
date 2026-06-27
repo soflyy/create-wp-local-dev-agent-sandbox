@@ -44,6 +44,7 @@ async function main() {
     githubToken: config.seedGithubToken,
     claudeToken: config.seedClaudeToken,
     codexToken: config.seedCodexToken,
+    opencodeToken: config.seedOpencodeToken,
   }).load();
   addSecrets(settings.secrets()); // redact the stored tokens from logs too
   const manager = new Manager(config, registry, settings);
