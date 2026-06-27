@@ -42,6 +42,14 @@ if [ -z "$CURSOR_KEY" ] && [ -f "$CURSOR_KEY_FILE" ]; then
   CURSOR_KEY="$(tr -d '[:space:]' < "$CURSOR_KEY_FILE")"
 fi
 
+# Codex (OpenAI) API key, resolved the same way: $CODEX_API_KEY, then the file.
+# `codex exec` honors CODEX_API_KEY for headless runs.
+CODEX_KEY="${CODEX_API_KEY:-}"
+CODEX_KEY_FILE="${CODEX_API_KEY_FILE:-$HOME/.agent-sandbox/codex-api-key}"
+if [ -z "$CODEX_KEY" ] && [ -f "$CODEX_KEY_FILE" ]; then
+  CODEX_KEY="$(tr -d '[:space:]' < "$CODEX_KEY_FILE")"
+fi
+
 # Only nudge about the credential for the agent actually being launched, so
 # `npm run bash` (and the other agent) stays quiet.
 case "${1:-}" in
@@ -61,11 +69,19 @@ case "${1:-}" in
       echo "  $CURSOR_KEY_FILE (one line), or 'export CURSOR_API_KEY=<key>'." >&2
     fi
     ;;
+  codex)
+    if [ -z "$CODEX_KEY" ]; then
+      echo "ℹ No Codex API key found (\$CODEX_API_KEY or $CODEX_KEY_FILE)." >&2
+      echo "  'codex exec' needs an OpenAI key — save one to $CODEX_KEY_FILE (one line)," >&2
+      echo "  or 'export CODEX_API_KEY=<key>'." >&2
+    fi
+    ;;
 esac
 
 # Export so the values are inherited by the container via name-only -e (off argv).
 export CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_TOKEN"
 export CURSOR_API_KEY="$CURSOR_KEY"
+export CODEX_API_KEY="$CODEX_KEY"
 
 # Allocate a TTY only when we actually have one. Interactive use (`npm run claude`,
 # `npm run bash`) keeps its TTY; piped/headless callers (e.g. driving
@@ -77,4 +93,5 @@ TTY_FLAG=""
 exec docker compose exec $TTY_FLAG \
   -e CLAUDE_CODE_OAUTH_TOKEN \
   -e CURSOR_API_KEY \
+  -e CODEX_API_KEY \
   workspace "$@"

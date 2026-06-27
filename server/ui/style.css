@@ -122,6 +122,12 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .err-msg { color: var(--red); margin-top: 10px; font-size: 13px; }
 .ok-msg { color: var(--green); margin-top: 10px; font-size: 13px; }
+.agent-pick { display: flex; gap: 8px; }
+.agent-opt { display: flex; align-items: center; gap: 6px; flex: 1; margin: 0; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px; cursor: pointer; color: var(--text); }
+.agent-opt.sel { border-color: var(--accent); background: var(--accent2); }
+.agent-opt input { width: auto; }
+.agent-tag { color: var(--accent); font-weight: 600; }
 .modal-foot .spacer { flex: 1; }
 .modal.wide { width: 560px; max-height: 90vh; overflow-y: auto; }
 .modal textarea.mono { resize: vertical; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }

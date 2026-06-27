@@ -66,6 +66,7 @@ export function loadConfig(env = process.env) {
     // seed the settings file on first run.
     seedGithubToken: env.GITHUB_TOKEN || '',
     seedClaudeToken: env.CLAUDE_CODE_OAUTH_TOKEN || '',
+    seedCodexToken: env.CODEX_API_KEY || '',
     gitAuthorName: env.GIT_AUTHOR_NAME || 'devbox',
     gitAuthorEmail: env.GIT_AUTHOR_EMAIL || 'devbox@localhost',
 
@@ -80,6 +81,8 @@ export function loadConfig(env = process.env) {
     // since these are throwaway dev boxes where capability matters. Override with
     // any model id via CLAUDE_DEFAULT_MODEL, or per-session in the UI/API.
     claudeDefaultModel: env.CLAUDE_DEFAULT_MODEL || 'opus',
+    // Codex (OpenAI) default model. null → let `codex exec` use its own default.
+    codexDefaultModel: env.CODEX_DEFAULT_MODEL || null,
     sessionRingBufferSize: parseInt(env.SESSION_RING_BUFFER || '500', 10),
   };
 
@@ -96,6 +99,6 @@ export function loadConfig(env = process.env) {
 
   // Initial secret strings for the log redactor (env-seeded). Tokens managed in
   // Settings are added to the redactor after the settings store loads.
-  config.secrets = [config.seedGithubToken, config.seedClaudeToken].filter(Boolean);
+  config.secrets = [config.seedGithubToken, config.seedClaudeToken, config.seedCodexToken].filter(Boolean);
   return Object.freeze(config);
 }
