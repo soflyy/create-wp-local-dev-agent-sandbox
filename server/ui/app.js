@@ -130,7 +130,7 @@ function SessionItem({ s, selectedId, onSelect, onDelete, now }) {
           : html`<span class="sess-time" title=${`last active ${fullTime(s.lastActivityAt)}`}>${fmtAgo(s.lastActivityAt)}</span>`}
         <button class="sess-del lnk" title="Delete session" onClick=${(e) => { e.stopPropagation(); onDelete(s); }}>🗑</button>
       </div>
-      <div class="sess-sub muted">started ${fmtAgo(s.createdAt, true)} · ${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
+      <div class="sess-sub muted"><span class="agent-tag">${s.agent === 'codex' ? 'Codex' : 'Claude'}</span> · started ${fmtAgo(s.createdAt, true)} · ${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
     </div>`;
 }
 
@@ -299,8 +299,8 @@ function SessionView({ session, now, onChanged, onBack, onDelete }) {
                 <button class="lnk small danger" onClick=${onDelete} title="Delete session">🗑</button>`}
         </div>
         <div class="bar-meta muted">
-          ${session.envName} · ${session.model || 'default model'} · $${(session.costUsd || 0).toFixed(4)}
-          ${session.claudeSessionId && html`· <code title="claude session id">${session.claudeSessionId.slice(0, 8)}</code>`}
+          ${session.envName} · <span class="agent-tag">${session.agent === 'codex' ? 'Codex' : 'Claude'}</span> · ${session.model || 'default model'} · $${(session.costUsd || 0).toFixed(4)}
+          ${session.claudeSessionId && html`· <code title="agent session id">${session.claudeSessionId.slice(0, 8)}</code>`}
         </div>
         <div class="bar-meta muted" title=${`started ${fullTime(session.createdAt)}\nlast active ${fullTime(session.lastActivityAt)}`}>
           started ${fmtAgo(session.createdAt, true)} ·${' '}
@@ -334,21 +334,31 @@ function SessionView({ session, now, onChanged, onBack, onDelete }) {
 function NewSessionModal({ envs, preselect, onClose, onCreate }) {
   const usable = envs.filter((e) => e.status === 'running' || e.status === 'degraded');
   const [envId, setEnvId] = useState(preselect || (usable[0] && usable[0].id));
+  const [agent, setAgent] = useState('claude');
   const [prompt, setPrompt] = useState('');
   const [err, setErr] = useState('');
   const create = async () => {
     if (!envId || !prompt.trim()) return;
-    try { await onCreate(envId, prompt.trim()); } catch (e) { setErr(e.message); }
+    try { await onCreate(envId, prompt.trim(), agent); } catch (e) { setErr(e.message); }
   };
   return html`
     <div class="modal-bg" onClick=${onClose}>
       <div class="modal" onClick=${(e) => e.stopPropagation()}>
-        <h3>New Claude session</h3>
+        <h3>New session</h3>
         ${usable.length === 0 && html`<div class="muted">No running environments. Create/start one first.</div>`}
         <label>Environment
           <select value=${envId} onChange=${(e) => setEnvId(e.target.value)}>
             ${usable.map((e) => html`<option value=${e.id} key=${e.id}>${e.name} (:${e.port})</option>`)}
           </select>
+        </label>
+        <label>Agent
+          <div class="agent-pick">
+            ${['claude', 'codex'].map((a) => html`
+              <label class=${`agent-opt ${agent === a ? 'sel' : ''}`} key=${a}>
+                <input type="radio" name="agent" checked=${agent === a} onChange=${() => setAgent(a)} />
+                ${a === 'claude' ? 'Claude' : 'Codex'}
+              </label>`)}
+          </div>
         </label>
         <label>First message
           <textarea value=${prompt} rows="4" onInput=${(e) => setPrompt(e.target.value)} placeholder="Describe the task…"></textarea>
@@ -549,6 +559,7 @@ function SettingsModal({ onClose, onLogout }) {
   const [s, setS] = useState(null);
   const [ghToken, setGh] = useState('');
   const [clToken, setCl] = useState('');
+  const [cxToken, setCx] = useState('');
   const [wpUser, setWpUser] = useState('');
   const [wpEmail, setWpEmail] = useState('');
   const [wpPass, setWpPass] = useState('');
@@ -570,9 +581,10 @@ function SettingsModal({ onClose, onLogout }) {
       const body = { wpAdminUser: wpUser, wpAdminEmail: wpEmail };
       if (ghToken) body.githubToken = ghToken;
       if (clToken) body.claudeToken = clToken;
+      if (cxToken) body.codexToken = cxToken;
       if (wpPass) body.wpAdminPassword = wpPass;
       const d = await api('/settings', { method: 'PUT', body: JSON.stringify(body) });
-      setS(d); setGh(''); setCl(''); setWpPass(''); setSaved(true);
+      setS(d); setGh(''); setCl(''); setCx(''); setWpPass(''); setSaved(true);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
 
@@ -588,6 +600,9 @@ function SettingsModal({ onClose, onLogout }) {
           </label>
           <label>Claude token <span class="muted small">— ${hint('claudeToken')}</span>
             <input type="password" value=${clToken} placeholder="sk-ant-oat… (from claude setup-token)" onInput=${(e) => setCl(e.target.value)} />
+          </label>
+          <label>Codex token <span class="muted small">— ${hint('codexToken')}</span>
+            <input type="password" value=${cxToken} placeholder="sk-… (OpenAI API key)" onInput=${(e) => setCx(e.target.value)} />
           </label>
           <label>WordPress admin username
             <input value=${wpUser} onInput=${(e) => setWpUser(e.target.value)} />
@@ -762,8 +777,8 @@ function App() {
   const selected = sessions.find((s) => s.id === selectedId);
   const logEnv = envs.find((e) => e.id === logEnvId);
 
-  const createSession = async (envId, prompt, model) => {
-    const s = await api(`/environments/${envId}/sessions`, { method: 'POST', body: JSON.stringify({ prompt, model }) });
+  const createSession = async (envId, prompt, agent) => {
+    const s = await api(`/environments/${envId}/sessions`, { method: 'POST', body: JSON.stringify({ prompt, agent }) });
     setNewSession(null); await refresh(); setSelectedId(s.id);
   };
   const createEnv = async (name, provision, prompt, presetIds) => {

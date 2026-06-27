@@ -1,13 +1,17 @@
-// Claude headless turn engine. Each turn spawns the environment's OWN
-// scripts/in-workspace.sh to run `claude -p … --output-format stream-json` in
-// the workspace container — reusing the proven auth path (token resolution +
-// -e forwarding + the onboarding seed). No Claude token is handled here; it's
-// resolved by in-workspace.sh from this process's env (server/.env) or
-// ~/.agent-sandbox/oauth-token, exactly like `npm run claude`.
+// Headless agent turn engine. Each turn spawns the environment's OWN
+// scripts/in-workspace.sh to run a coding agent (`claude -p …` or `codex exec …`)
+// in the workspace container — reusing the proven auth path (token resolution +
+// -e forwarding). The agent's own session/thread id is captured for --resume.
 //
-// Claude runs with the container's default cwd (/home/node) every turn, so its
-// session jsonl is consistently scoped and --resume works (and an operator can
-// `bash scripts/in-workspace.sh claude --resume <id>` to take over).
+// Two agents are supported (chosen per session). Claude's stream-json is recorded
+// raw; Codex's `--json` events are normalized into the same event vocabulary the
+// UI already renders, so the transcript UI is agent-agnostic.
+//
+// An agent turn runs INSIDE the workspace container (via `docker compose exec`),
+// so it does NOT die when the server / exec client dies — it's reparented to the
+// container's init and keeps running. We reap it explicitly on interrupt,
+// shutdown, and restart; otherwise a later resume spawns a second agent that
+// races the orphan. The slim image has no pkill, so we sweep /proc.
 
 import { spawn } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
@@ -16,29 +20,109 @@ import { join } from 'node:path';
 import { exec } from './docker.js';
 import { log, redact } from './log.js';
 
-const CLAUDE_CWD = '/home/node'; // in-workspace.sh runs claude here (container WORKDIR)
+const AGENT_CWD = '/home/node'; // in-workspace.sh runs the agent here (container WORKDIR)
 
-// A `claude -p` turn runs INSIDE the workspace container (via `docker compose
-// exec`), so it does NOT die when the server / the exec client dies — it's
-// reparented to the container's init and keeps running. We must reap it
-// explicitly on interrupt, shutdown, and restart; otherwise a later --resume
-// spawns a SECOND claude that races the orphan over the same WordPress install.
-// The slim image has no pkill, so sweep /proc. TERM, then KILL stragglers.
-const REAP_CLAUDE = `self=$$
+// Per-agent specifics: how to build the command, which token to inject, and how
+// to turn one stdout line into { records[], sessionId?, result?, addCost?, errorText? }.
+// `records` are events in the UI's vocabulary (system/assistant/user/result/stderr/raw).
+export const AGENTS = {
+  claude: {
+    label: 'Claude',
+    procMatch: 'claude -p ', // cmdline prefix used to reap the in-container turn
+    settingsKey: 'claudeToken',
+    tokenEnv: 'CLAUDE_CODE_OAUTH_TOKEN',
+    defaultModel: (config) => config.claudeDefaultModel || null,
+    resumeHint: (dir, sid) => `cd ${dir} && bash scripts/in-workspace.sh claude --resume ${sid}`,
+    buildArgs(session, prompt) {
+      const a = ['claude', '-p', prompt, '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--dangerously-skip-permissions'];
+      if (session.model) a.push('--model', session.model);
+      if (session.claudeSessionId) a.push('--resume', session.claudeSessionId);
+      return a;
+    },
+    parseLine(line) {
+      let evt;
+      try { evt = JSON.parse(line); } catch { return { records: [{ type: 'raw', text: line }] }; }
+      const out = { records: [evt] };
+      if (evt.type === 'system' && evt.subtype === 'init' && evt.session_id) out.sessionId = evt.session_id;
+      if (evt.type === 'result') {
+        if (typeof evt.result === 'string') out.result = evt.result;
+        if (typeof evt.total_cost_usd === 'number') out.addCost = evt.total_cost_usd;
+        if (evt.session_id) out.sessionId = evt.session_id;
+        if (evt.is_error) out.errorText = typeof evt.result === 'string' ? evt.result : 'claude reported an error';
+      }
+      return out;
+    },
+  },
+  codex: {
+    label: 'Codex',
+    procMatch: 'codex exec', // cmdline prefix used to reap the in-container turn
+    settingsKey: 'codexToken',
+    tokenEnv: 'CODEX_API_KEY',
+    defaultModel: (config) => config.codexDefaultModel || null,
+    resumeHint: (dir, sid) => `cd ${dir} && bash scripts/in-workspace.sh codex exec resume ${sid}`,
+    buildArgs(session, prompt) {
+      // exec-level flags (--json, -C, -m, sandbox bypass) MUST come before the
+      // `resume` subcommand — `codex exec resume` has a narrow option set and
+      // rejects them. So: codex exec <exec-flags> [resume <id>] <prompt>.
+      const a = ['codex', 'exec', '--json', '--dangerously-bypass-approvals-and-sandbox', '--skip-git-repo-check', '-C', AGENT_CWD];
+      if (session.model) a.push('-m', session.model);
+      if (session.claudeSessionId) a.push('resume', session.claudeSessionId);
+      a.push(prompt);
+      return a;
+    },
+    // Normalize codex --json events → the UI's claude-shaped vocabulary.
+    parseLine(line) {
+      let evt;
+      try { evt = JSON.parse(line); } catch { return { records: [{ type: 'raw', text: line }] }; }
+      const out = { records: [] };
+      const assistantText = (text) => ({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+      const toolUse = (name, input) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', name, input }] } });
+      switch (evt.type) {
+        case 'thread.started':
+          if (evt.thread_id) { out.sessionId = evt.thread_id; out.records.push({ type: 'system', subtype: 'init', session_id: evt.thread_id, model: 'codex' }); }
+          break;
+        case 'item.completed': {
+          const it = evt.item || {};
+          if (it.type === 'agent_message' && it.text) { out.records.push(assistantText(it.text)); out.result = it.text; }
+          else if (it.type === 'reasoning' && (it.text || it.summary)) out.records.push(assistantText(it.text || it.summary));
+          else if (it.type) out.records.push(toolUse(it.type, it)); // command_execution / file_change / tool_call / mcp_tool_call …
+          break;
+        }
+        case 'error':
+          out.errorText = String(evt.message || JSON.stringify(evt));
+          out.records.push({ type: 'stderr', text: out.errorText });
+          break;
+        case 'turn.failed':
+          out.errorText = `turn failed: ${JSON.stringify(evt.error || evt)}`;
+          out.records.push({ type: 'stderr', text: out.errorText });
+          break;
+        case 'turn.completed':
+          out.records.push({ type: 'result', result: '', total_cost_usd: 0, usage: evt.usage });
+          break;
+        default:
+          break; // turn.started, item.started, etc. — nothing to show
+      }
+      return out;
+    },
+  },
+};
+
+const agentFor = (name) => AGENTS[name] || AGENTS.claude;
+
+// Reap any in-container agent turn (claude OR codex) for this env. Best-effort.
+const REAP_AGENTS = `self=$$
 for sig in TERM KILL; do
   for d in /proc/[0-9]*; do
     pid=\${d#/proc/}; [ "$pid" = "$self" ] && continue
     c=$(tr '\\0' ' ' < "$d/cmdline" 2>/dev/null)
-    case "$c" in "claude -p "*) kill -$sig "$pid" 2>/dev/null ;; esac
+    case "$c" in "claude -p "*|"codex exec"*) kill -$sig "$pid" 2>/dev/null ;; esac
   done
   [ "$sig" = TERM ] && sleep 1
 done`;
 
-// Kill any in-container claude turn for this env (best-effort; no-op if the
-// container is down or nothing matches).
-export async function reapClaude(env) {
+export async function reapAgents(env) {
   try {
-    await exec(env, 'workspace', ['sh', '-c', REAP_CLAUDE], { timeout: 15_000 });
+    await exec(env, 'workspace', ['sh', '-c', REAP_AGENTS], { timeout: 15_000 });
   } catch { /* container gone or nothing to kill */ }
 }
 
@@ -48,23 +132,25 @@ export class ClaudeEngine {
     this.store = store;
     this.bus = bus;
     this.settings = settings;
-    this.active = new Map(); // sessionId -> { child, ndjson }
+    this.active = new Map(); // sessionId -> { child, ndjson, interrupting, env }
   }
 
   isActive(id) {
     return this.active.has(id);
   }
 
-  // Start a brand-new session (turn 1, no --resume). Returns the session record.
-  async newSession(env, { prompt, model }) {
+  // Start a brand-new session (turn 1). `agent` is 'claude' (default) or 'codex'.
+  async newSession(env, { prompt, model, agent } = {}) {
+    const name = AGENTS[agent] ? agent : 'claude';
     const id = `sess_${randomBytes(5).toString('hex')}`;
     const record = {
       id,
       envId: env.id,
       envName: env.name,
-      claudeSessionId: null,
-      cwd: CLAUDE_CWD,
-      model: model || this.config.claudeDefaultModel || null,
+      agent: name,
+      claudeSessionId: null, // the agent's own resume id (claude session_id / codex thread_id)
+      cwd: AGENT_CWD,
+      model: model || agentFor(name).defaultModel(this.config) || null,
       title: title(prompt),
       status: 'running',
       turnCount: 0,
@@ -80,49 +166,38 @@ export class ClaudeEngine {
     return record;
   }
 
-  // Continue an existing session (turn 2+, with --resume). Caller ensures the
-  // session isn't already running.
+  // Continue an existing session (resume). Caller ensures it isn't already running.
   async sendMessage(env, session, { prompt }) {
     await this.store.update(session.id, { status: 'running', lastActivityAt: new Date().toISOString() });
     this._runTurn(env, { ...session, status: 'running' }, prompt);
   }
 
   _runTurn(env, session, prompt) {
-    const args = [
-      join(env.dir, 'scripts', 'in-workspace.sh'),
-      'claude', '-p', prompt,
-      '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-      '--dangerously-skip-permissions',
-    ];
-    if (session.model) args.push('--model', session.model);
-    if (session.claudeSessionId) args.push('--resume', session.claudeSessionId);
+    const agent = agentFor(session.agent);
+    const args = [join(env.dir, 'scripts', 'in-workspace.sh'), ...agent.buildArgs(session, prompt)];
 
     mkdirSync(this.config.sessionsDir, { recursive: true });
     const ndjson = createWriteStream(session.eventLogPath, { flags: 'a' });
     ndjson.on('error', (e) => log.warn(`[${session.id}] event log write error:`, e.message));
     ndjson.write(`${JSON.stringify({ type: 'control', subtype: 'turn-start', at: new Date().toISOString() })}\n`);
 
-    // `claude -p` doesn't echo the prompt in its output (it's argv), so record it
-    // ourselves — to the ndjson (shows on transcript reload) and the live bus —
-    // otherwise the UI only ever shows Claude's side, never the user's message.
-    // uuid lets the UI dedupe the transcript-replay vs the SSE backlog copy.
+    // The agent doesn't echo the prompt (it's argv), so record it ourselves — to
+    // the ndjson (transcript reload) and the live bus. uuid dedupes replay vs SSE.
     const promptEvt = { type: 'user_prompt', text: prompt, uuid: randomUUID() };
     ndjson.write(JSON.stringify(promptEvt) + '\n');
     this.bus.publish(session.id, promptEvt);
 
-    // stdin ignored → in-workspace.sh sees a non-TTY → adds -T → clean stream-json.
-    // Inject the Claude token from Settings (if set) so in-workspace.sh resolves
-    // CLAUDE_CODE_OAUTH_TOKEN from it; otherwise it falls back to the host's env /
-    // ~/.agent-sandbox/oauth-token exactly as before.
-    const claudeToken = this.settings && this.settings.get().claudeToken;
-    const childEnv = claudeToken ? { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: claudeToken } : process.env;
+    // Inject the agent's token from Settings (if set); else in-workspace.sh falls
+    // back to the host env / ~/.agent-sandbox file. stdin ignored → non-TTY → -T.
+    const token = this.settings && this.settings.get()[agent.settingsKey];
+    const childEnv = token ? { ...process.env, [agent.tokenEnv]: token } : process.env;
     const child = spawn('bash', args, { cwd: env.dir, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     const entry = { child, ndjson, interrupting: false, env };
     this.active.set(session.id, entry);
 
     let buf = '';
     let stderr = '';
-    const pending = { claudeSessionId: session.claudeSessionId, lastResult: null, addCost: 0 };
+    const pending = { sessionId: session.claudeSessionId, lastResult: null, addCost: 0, errorText: null };
 
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
@@ -131,7 +206,7 @@ export class ClaudeEngine {
       while ((nl = buf.indexOf('\n')) !== -1) {
         const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
-        if (line.trim()) this._handleLine(session, line, ndjson, pending);
+        if (line.trim()) this._handleLine(session, agent, line, ndjson, pending);
       }
     });
     child.stderr.on('data', (d) => {
@@ -141,27 +216,25 @@ export class ClaudeEngine {
     });
 
     const finalize = async (code, signal) => {
-      if (buf.trim()) this._handleLine(session, buf, ndjson, pending); // trailing partial line
+      if (buf.trim()) this._handleLine(session, agent, buf, ndjson, pending); // trailing partial line
       buf = '';
       ndjson.end();
       this.active.delete(session.id);
-      // docker compose exec translates SIGINT to a non-zero exit code, so detect
-      // interruption from the flag we set, not the signal.
       const interrupted = entry.interrupting || signal === 'SIGINT' || signal === 'SIGTERM';
       const status = interrupted ? 'interrupted' : code === 0 ? 'idle' : 'error';
       const patch = {
         status,
         turnCount: (session.turnCount || 0) + 1,
         lastActivityAt: new Date().toISOString(),
-        claudeSessionId: pending.claudeSessionId || session.claudeSessionId || null,
+        claudeSessionId: pending.sessionId || session.claudeSessionId || null,
         costUsd: (session.costUsd || 0) + pending.addCost,
       };
       if (pending.lastResult != null) patch.lastResult = trunc(pending.lastResult, 4000);
-      if (status === 'error') patch.lastError = trunc(redact(stderr) || `claude exited with code ${code}`, 800);
+      if (status === 'error') patch.lastError = trunc(redact(pending.errorText || stderr) || `${agent.label} exited with code ${code}`, 800);
       else if (status === 'idle') patch.lastError = null;
       await this.store.update(session.id, patch);
       this.bus.publish(session.id, { type: 'control', subtype: 'turn-end', code, status });
-      log.info(`[${session.id}] turn ended (${status}, code ${code})`);
+      log.info(`[${session.id}] ${agent.label} turn ended (${status}, code ${code})`);
     };
 
     child.on('error', (err) => {
@@ -171,28 +244,20 @@ export class ClaudeEngine {
     child.on('close', (code, signal) => finalize(code, signal).catch((e) => log.warn(`[${session.id}] finalize:`, e.message)));
   }
 
-  // Record one stdout line: append to ndjson, publish to the bus, and capture
-  // session_id / result / cost into `pending`.
-  _handleLine(session, line, ndjson, pending) {
-    let evt;
-    try {
-      evt = JSON.parse(line);
-    } catch {
-      evt = { type: 'raw', text: line };
+  // Parse one stdout line via the agent, record its events, capture state.
+  _handleLine(session, agent, line, ndjson, pending) {
+    const { records = [], sessionId, result, addCost, errorText } = agent.parseLine(line);
+    for (const rec of records) {
+      ndjson.write(JSON.stringify(rec) + '\n');
+      this.bus.publish(session.id, rec);
     }
-    ndjson.write(line + '\n');
-    this.bus.publish(session.id, evt);
-
-    if (evt.type === 'system' && evt.subtype === 'init' && evt.session_id && !pending.claudeSessionId) {
-      pending.claudeSessionId = evt.session_id;
-      // Persist the resume id immediately so a crash mid-turn stays resumable.
-      this.store.update(session.id, { claudeSessionId: evt.session_id }).catch(() => {});
+    if (sessionId && !pending.sessionId) {
+      pending.sessionId = sessionId;
+      this.store.update(session.id, { claudeSessionId: sessionId }).catch(() => {}); // persist immediately → resumable
     }
-    if (evt.type === 'result') {
-      if (typeof evt.result === 'string') pending.lastResult = evt.result;
-      if (typeof evt.total_cost_usd === 'number') pending.addCost += evt.total_cost_usd;
-      if (evt.session_id && !pending.claudeSessionId) pending.claudeSessionId = evt.session_id;
-    }
+    if (typeof result === 'string') pending.lastResult = result;
+    if (typeof addCost === 'number') pending.addCost += addCost;
+    if (errorText) pending.errorText = errorText;
   }
 
   interrupt(id) {
@@ -200,11 +265,10 @@ export class ClaudeEngine {
     if (!a) return false;
     a.interrupting = true;
     a.child.kill('SIGINT'); // the local docker-exec client
-    if (a.env) reapClaude(a.env).catch(() => {}); // the in-container turn (survives the client)
+    if (a.env) reapAgents(a.env).catch(() => {}); // the in-container turn (survives the client)
     return true;
   }
 
-  // Interrupt every active turn (local client + in-container). Returns the count.
   interruptAll() {
     const ids = [...this.active.keys()];
     for (const id of ids) this.interrupt(id);
@@ -217,7 +281,7 @@ export class ClaudeEngine {
       const a = this.active.get(s.id);
       if (a) { a.interrupting = true; a.child.kill('SIGTERM'); env = a.env; }
     }
-    if (env) reapClaude(env).catch(() => {});
+    if (env) reapAgents(env).catch(() => {});
   }
 }
 

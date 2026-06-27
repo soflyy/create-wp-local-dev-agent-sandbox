@@ -6,6 +6,7 @@ import { route } from './http.js';
 import { addSecrets } from './log.js';
 import { exec } from './docker.js';
 import { systemHealth } from './health.js';
+import { AGENTS } from './claude.js';
 import { AllocationError } from './allocator.js';
 import { openSse } from './sse.js';
 import { makeStaticHandler } from './static.js';
@@ -37,12 +38,13 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
   const sshHint = (s) => {
     const env = registry.get(s.envId);
     if (!env || !s.claudeSessionId) return null;
-    return `cd ${env.dir} && bash scripts/in-workspace.sh claude --resume ${s.claudeSessionId}`;
+    return (AGENTS[s.agent] || AGENTS.claude).resumeHint(env.dir, s.claudeSessionId);
   };
   const publicSession = (s) => ({
     id: s.id,
     envId: s.envId,
     envName: s.envName,
+    agent: s.agent || 'claude',
     claudeSessionId: s.claudeSessionId,
     cwd: s.cwd,
     model: s.model,
@@ -170,13 +172,14 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
       ctx.send(200, { deleted: true });
     }),
 
-    // ---- claude sessions --------------------------------------------------
+    // ---- agent sessions (claude | codex) ----------------------------------
     route('POST', '/environments/:id/sessions', async (ctx) => {
       const env = envOr404(ctx);
       await assertUsable(env);
       const prompt = (ctx.body.prompt || '').trim();
       if (!prompt) throw httpErr(400, 'prompt is required');
-      const record = await sessions.engine.newSession(env, { prompt, model: ctx.body.model });
+      const agent = AGENTS[ctx.body.agent] ? ctx.body.agent : 'claude';
+      const record = await sessions.engine.newSession(env, { prompt, model: ctx.body.model, agent });
       ctx.send(202, publicSession(record));
     }),
 

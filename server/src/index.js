@@ -14,7 +14,7 @@ import { SettingsStore } from './settings.js';
 import { Manager } from './manager.js';
 import { SessionStore } from './sessions.js';
 import { SessionBus } from './sessionbus.js';
-import { ClaudeEngine, reapClaude } from './claude.js';
+import { ClaudeEngine, reapAgents } from './claude.js';
 import { buildRoutes } from './routes.js';
 import { createServer } from './http.js';
 
@@ -43,6 +43,7 @@ async function main() {
   const settings = await new SettingsStore(config.settingsPath, {
     githubToken: config.seedGithubToken,
     claudeToken: config.seedClaudeToken,
+    codexToken: config.seedCodexToken,
   }).load();
   addSecrets(settings.secrets()); // redact the stored tokens from logs too
   const manager = new Manager(config, registry, settings);
@@ -54,11 +55,11 @@ async function main() {
   const claudeEngine = new ClaudeEngine(config, sessionStore, sessionBus, settings);
   const sessions = { store: sessionStore, engine: claudeEngine, bus: sessionBus };
 
-  // A `claude -p` turn runs inside the workspace container and SURVIVES a server
-  // restart. This new server owns no turns yet, so any `claude -p` still running
-  // in a container is an orphan from a previous run — reap them, otherwise a
-  // resume would spawn a second claude that races the orphan. Best-effort.
-  await Promise.allSettled(registry.list().map((e) => reapClaude(e)));
+  // An agent turn (`claude -p` / `codex exec`) runs inside the workspace container
+  // and SURVIVES a server restart. This new server owns no turns yet, so any still
+  // running in a container is an orphan from a previous run — reap them, otherwise
+  // a resume would spawn a second agent that races the orphan. Best-effort.
+  await Promise.allSettled(registry.list().map((e) => reapAgents(e)));
 
   // When an env finishes provisioning, optionally kick off its initial session
   // (the prompt passed to POST /environments). Decoupled via this hook so the
@@ -80,19 +81,19 @@ async function main() {
     manager.startReconcileLoop();
   });
 
-  // On a plain restart (Ctrl+C / SIGTERM) we reap the in-container Claude turns
-  // so they don't orphan — but leave the env CONTAINERS running, so a restart is
-  // seamless and sessions resume cleanly (no duplicate). Full teardown incl.
-  // stopping containers is the explicit /control/shutdown action.
+  // On a plain restart (Ctrl+C / SIGTERM) we reap the in-container agent turns
+  // (claude/codex) so they don't orphan — but leave the env CONTAINERS running, so
+  // a restart is seamless and sessions resume cleanly (no duplicate). Full teardown
+  // incl. stopping containers is the explicit /control/shutdown action.
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    log.info('shutting down — reaping active Claude turns (containers stay up)');
+    log.info('shutting down — reaping active agent turns (containers stay up)');
     try {
       claudeEngine.interruptAll();
       await Promise.race([
-        Promise.allSettled(registry.list().map((e) => reapClaude(e))),
+        Promise.allSettled(registry.list().map((e) => reapAgents(e))),
         new Promise((r) => setTimeout(r, 4000)),
       ]);
     } catch { /* exiting regardless */ }
