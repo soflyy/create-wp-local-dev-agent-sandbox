@@ -19,7 +19,14 @@ This WordPress install is split across Docker containers on a shared network:
 - **db** — MariaDB database (reachable on the network as host `db`).
 - **wordpress** — the Apache/PHP web server serving the site at `http://wordpress/`.
 - **playwright** — a headless-Chromium Playwright MCP server; point its browser
-  at `http://wordpress/`.
+  at `http://wordpress/`. **Use it to *see* rendered pages** — whenever a task
+  involves how something looks (layout, styling, "pixel perfect", does-it-render),
+  drive the browser with the `browser_navigate` / `browser_take_screenshot` MCP
+  tools rather than guessing from source. Screenshots are written to
+  `/home/node/.playwright-output/` — the **same path in your workspace** — so
+  after `browser_take_screenshot` you can **`Read` the saved PNG** (the path the
+  tool reports) and actually look at it. Tip: set a viewport with `browser_resize`
+  first for a predictable capture.
 
 **Reaching the site:** from inside any container (including the Playwright
 browser) use `http://wordpress/`, e.g. `http://wordpress/wp-login.php`.

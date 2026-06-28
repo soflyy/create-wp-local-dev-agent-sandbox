@@ -89,8 +89,18 @@ services:
   # workspace connects to it over HTTP at http://playwright:8931/mcp and drives a
   # browser against the site at http://wordpress. --allowed-hosts must list the
   # host:port Claude uses (the server otherwise only accepts localhost).
+  #
+  # --output-dir writes screenshots/traces into /home/node/.playwright-output.
+  # Because the workspace is bind-mounted here at the SAME path it has in the
+  # workspace container (below), a screenshot Playwright saves is readable by the
+  # agent at the exact path the tool reports — so it can Read the image back and
+  # actually look at it. Without this, files land only inside this container and
+  # the agent can't see them. The image runs as uid 1000 (node), matching the
+  # workspace's owner, so writes succeed.
   playwright:
     image: mcr.microsoft.com/playwright/mcp:latest
     restart: unless-stopped
     init: true
-    command: ["--port", "8931", "--host", "0.0.0.0", "--allowed-hosts", "playwright:8931"]
+    command: ["--port", "8931", "--host", "0.0.0.0", "--allowed-hosts", "playwright:8931", "--output-dir", "/home/node/.playwright-output"]
+    volumes:
+      - ./workspace:/home/node
