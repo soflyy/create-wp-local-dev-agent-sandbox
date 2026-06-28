@@ -7,7 +7,6 @@ import { addSecrets } from './log.js';
 import { exec } from './docker.js';
 import { systemHealth } from './health.js';
 import { AGENTS } from './claude.js';
-import { ensureZenModels, zenModelsList } from './zenmodels.js';
 import { AllocationError } from './allocator.js';
 import { openSse } from './sse.js';
 import { makeStaticHandler } from './static.js';
@@ -114,9 +113,6 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
       }
     }),
     route('GET', '/environments', async (ctx) => ctx.send(200, { environments: await manager.list() })),
-    // Model choices the UI can offer. claude/codex are a small fixed set baked
-    // into the UI; opencode (Zen) is fetched live so the list never goes stale.
-    route('GET', '/models', async (ctx) => { await ensureZenModels(); ctx.send(200, { opencode: zenModelsList() }); }),
     route('GET', '/environments/:id', async (ctx) => ctx.send(200, await manager.describe(envOr404(ctx)))),
     route('GET', '/environments/:id/logs', async (ctx) => {
       const which = ctx.query.get('which') || 'all';

@@ -331,7 +331,7 @@ function SessionView({ session, now, onChanged, onBack, onDelete }) {
     </section>`;
 }
 
-function NewSessionModal({ envs, preselect, onClose, onCreate, opencodeModels }) {
+function NewSessionModal({ envs, preselect, onClose, onCreate }) {
   const usable = envs.filter((e) => e.status === 'running' || e.status === 'degraded');
   const [envId, setEnvId] = useState(preselect || (usable[0] && usable[0].id));
   const [agent, setAgent] = useState('claude');
@@ -354,7 +354,7 @@ function NewSessionModal({ envs, preselect, onClose, onCreate, opencodeModels })
         </label>
         <${AgentPicker} agent=${agent} model=${model} prompt=${prompt}
           onAgent=${setAgent} onModel=${setModel} onPrompt=${setPrompt}
-          opencodeModels=${opencodeModels} promptLabel="First message" />
+          promptLabel="First message" />
         ${err && html`<div class="err-msg">${err}</div>`}
         <div class="modal-foot">
           <button class="btn ghost" onClick=${onClose}>Cancel</button>
@@ -391,10 +391,10 @@ const AGENT_LABELS = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode' };
 const agentLabel = (a) => AGENT_LABELS[a] || 'Claude';
 const AGENTS_ORDER = ['claude', 'codex', 'opencode'];
 
-// Curated model choices for the agents with a small, stable set. The first entry
-// (id '') means "let the agent / server default decide". OpenCode (Zen) is NOT
-// here — its list is fetched live from the server (GET /models) since it changes
-// often. A "Custom…" escape hatch always lets you type any id. Set only at start.
+// Curated model choices per agent. The first entry (id '') means "let the agent /
+// server default decide". A "Custom…" escape hatch lets you type any id, except
+// for agents in NO_CUSTOM_MODEL. Set only at session start. The OpenCode (Zen)
+// list is the subset verified usable with our Zen key (see its comment below).
 const MODELS = {
   claude: [
     { id: '', label: 'Default' },
@@ -409,6 +409,56 @@ const MODELS = {
     { id: 'gpt-5.4-mini', label: 'gpt-5.4-mini' },
     { id: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark (ChatGPT sign-in only)' },
   ],
+  // OpenCode (Zen) — the models verified usable with our Zen key (probed via
+  // `opencode run -m opencode/<id>`; the gateway catalog is a superset that
+  // includes gated/retired models that error on use). Custom… stays available
+  // for anything new. Re-probe to refresh: scratchpad/probe2.sh.
+  opencode: [
+    { id: '', label: 'Default (Claude Sonnet 4.6)' },
+    { id: 'opencode/claude-opus-4-8', label: 'claude-opus-4-8' },
+    { id: 'opencode/claude-opus-4-7', label: 'claude-opus-4-7' },
+    { id: 'opencode/claude-opus-4-6', label: 'claude-opus-4-6' },
+    { id: 'opencode/claude-opus-4-5', label: 'claude-opus-4-5' },
+    { id: 'opencode/claude-opus-4-1', label: 'claude-opus-4-1' },
+    { id: 'opencode/claude-sonnet-4-6', label: 'claude-sonnet-4-6' },
+    { id: 'opencode/claude-sonnet-4-5', label: 'claude-sonnet-4-5' },
+    { id: 'opencode/claude-haiku-4-5', label: 'claude-haiku-4-5' },
+    { id: 'opencode/gemini-3.5-flash', label: 'gemini-3.5-flash' },
+    { id: 'opencode/gemini-3.1-pro', label: 'gemini-3.1-pro' },
+    { id: 'opencode/gemini-3-flash', label: 'gemini-3-flash' },
+    { id: 'opencode/gpt-5.5', label: 'gpt-5.5' },
+    { id: 'opencode/gpt-5.5-pro', label: 'gpt-5.5-pro' },
+    { id: 'opencode/gpt-5.4', label: 'gpt-5.4' },
+    { id: 'opencode/gpt-5.4-pro', label: 'gpt-5.4-pro' },
+    { id: 'opencode/gpt-5.4-mini', label: 'gpt-5.4-mini' },
+    { id: 'opencode/gpt-5.4-nano', label: 'gpt-5.4-nano' },
+    { id: 'opencode/gpt-5.3-codex', label: 'gpt-5.3-codex' },
+    { id: 'opencode/gpt-5.2', label: 'gpt-5.2' },
+    { id: 'opencode/gpt-5.2-codex', label: 'gpt-5.2-codex' },
+    { id: 'opencode/gpt-5.1', label: 'gpt-5.1' },
+    { id: 'opencode/gpt-5.1-codex-max', label: 'gpt-5.1-codex-max' },
+    { id: 'opencode/gpt-5.1-codex', label: 'gpt-5.1-codex' },
+    { id: 'opencode/gpt-5.1-codex-mini', label: 'gpt-5.1-codex-mini' },
+    { id: 'opencode/gpt-5', label: 'gpt-5' },
+    { id: 'opencode/gpt-5-codex', label: 'gpt-5-codex' },
+    { id: 'opencode/gpt-5-nano', label: 'gpt-5-nano' },
+    { id: 'opencode/grok-build-0.1', label: 'grok-build-0.1' },
+    { id: 'opencode/deepseek-v4-pro', label: 'deepseek-v4-pro' },
+    { id: 'opencode/deepseek-v4-flash', label: 'deepseek-v4-flash' },
+    { id: 'opencode/glm-5.2', label: 'glm-5.2' },
+    { id: 'opencode/glm-5.1', label: 'glm-5.1' },
+    { id: 'opencode/glm-5', label: 'glm-5' },
+    { id: 'opencode/minimax-m2.7', label: 'minimax-m2.7' },
+    { id: 'opencode/kimi-k2.6', label: 'kimi-k2.6' },
+    { id: 'opencode/kimi-k2.5', label: 'kimi-k2.5' },
+    { id: 'opencode/qwen3.6-plus', label: 'qwen3.6-plus' },
+    { id: 'opencode/qwen3.5-plus', label: 'qwen3.5-plus' },
+    { id: 'opencode/big-pickle', label: 'big-pickle' },
+    { id: 'opencode/deepseek-v4-flash-free', label: 'deepseek-v4-flash-free' },
+    { id: 'opencode/mimo-v2.5-free', label: 'mimo-v2.5-free' },
+    { id: 'opencode/nemotron-3-ultra-free', label: 'nemotron-3-ultra-free' },
+    { id: 'opencode/north-mini-code-free', label: 'north-mini-code-free' },
+  ],
 };
 // Agents whose model list is fixed — no free-text "Custom…" option.
 const NO_CUSTOM_MODEL = new Set(['codex']);
@@ -417,13 +467,10 @@ const MODEL_CUSTOM = '__custom__';
 // Shared agent + model + first-message chooser, used by both the New Session and
 // New Environment dialogs so the choices stay identical. Controlled: the parent
 // owns agent/model/prompt state (it submits them). Model is start-only by design —
-// there's no editor for it after a session begins. `opencodeModels` is the live
-// Zen list (slugs) fetched by the app; empty → only Default + Custom… are offered.
-function AgentPicker({ agent, model, prompt, onAgent, onModel, onPrompt, opencodeModels = [], promptLabel = 'First message', promptHint = '', promptRows = 4, promptPlaceholder = 'Describe the task…' }) {
+// there's no editor for it after a session begins.
+function AgentPicker({ agent, model, prompt, onAgent, onModel, onPrompt, promptLabel = 'First message', promptHint = '', promptRows = 4, promptPlaceholder = 'Describe the task…' }) {
   const [custom, setCustom] = useState(false);
-  const list = agent === 'opencode'
-    ? [{ id: '', label: 'Default (Claude Sonnet 4.6)' }, ...opencodeModels.map((id) => ({ id, label: id.replace(/^opencode\//, '') }))]
-    : (MODELS[agent] || MODELS.claude);
+  const list = MODELS[agent] || MODELS.claude;
   const allowCustom = !NO_CUSTOM_MODEL.has(agent);
   const pickAgent = (a) => { onAgent(a); onModel(''); setCustom(false); }; // reset model to default
   const pickModel = (v) => { if (v === MODEL_CUSTOM) { setCustom(true); onModel(''); } else { setCustom(false); onModel(v); } };
@@ -502,7 +549,7 @@ function LogViewer({ env, onClose }) {
     </div>`;
 }
 
-function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset, opencodeModels }) {
+function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset }) {
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
   const [agent, setAgent] = useState('claude');
@@ -568,7 +615,7 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset,
         </label>
         <${AgentPicker} agent=${agent} model=${model} prompt=${prompt}
           onAgent=${setAgent} onModel=${setModel} onPrompt=${setPrompt}
-          opencodeModels=${opencodeModels} promptLabel="First prompt" promptRows=${3}
+          promptLabel="First prompt" promptRows=${3}
           promptHint="— optional; once the env is ready, a session with this agent/model starts with this"
           promptPlaceholder="e.g. Add a custom field to the Oxygen builder and verify it renders." />
         <label>Presets <span class="muted small">— compose any number; applied in the order you check them</span></label>
@@ -815,7 +862,6 @@ function App() {
   const [authed, setAuthed] = useState(!!token.get());
   const [showSettings, setShowSettings] = useState(false);
   const [showHealth, setShowHealth] = useState(false);
-  const [opencodeModels, setOpencodeModels] = useState([]); // live Zen slugs for the model dropdown
   const [now, setNow] = useState(() => Date.now());
 
   const refresh = useCallback(async () => {
@@ -826,10 +872,6 @@ function App() {
   }, []);
 
   useEffect(() => { if (authed) { refresh(); const t = setInterval(refresh, 3000); return () => clearInterval(t); } }, [authed, refresh]);
-
-  // OpenCode Zen model list for the dropdown — fetched once (rarely changes).
-  // Fail-soft: on error it stays [], so the dropdown offers only Default + Custom.
-  useEffect(() => { if (authed) api('/models').then((d) => setOpencodeModels(Array.isArray(d.opencode) ? d.opencode : [])).catch(() => {}); }, [authed]);
 
   // Tick once a second ONLY while a session is actively running, so the live
   // "working Ns" counters advance smoothly without re-rendering when idle.
@@ -913,8 +955,8 @@ function App() {
               ? html`No environments yet. <button class="btn" onClick=${() => setShowNewEnv(true)}>Create an environment</button> to begin.`
               : html`Select a session, or <button class="btn" onClick=${() => setNewSession({})}>start a new one</button>.`}
           </div></section>`}
-      ${newSession && html`<${NewSessionModal} envs=${envs} preselect=${newSession.preselect} onClose=${() => setNewSession(null)} onCreate=${createSession} opencodeModels=${opencodeModels} />`}
-      ${showNewEnv && html`<${NewEnvModal} presets=${presets} onClose=${() => setShowNewEnv(false)} onCreate=${createEnv} onSavePreset=${savePreset} onDeletePreset=${deletePreset} opencodeModels=${opencodeModels} />`}
+      ${newSession && html`<${NewSessionModal} envs=${envs} preselect=${newSession.preselect} onClose=${() => setNewSession(null)} onCreate=${createSession} />`}
+      ${showNewEnv && html`<${NewEnvModal} presets=${presets} onClose=${() => setShowNewEnv(false)} onCreate=${createEnv} onSavePreset=${savePreset} onDeletePreset=${deletePreset} />`}
       ${logEnvId && logEnv && html`<${LogViewer} env=${logEnv} onClose=${() => setLogEnvId(null)} />`}
       ${showSettings && html`<${SettingsModal} onClose=${() => setShowSettings(false)}
         onLogout=${() => { token.set(''); setShowSettings(false); setAuthed(false); setNeedToken(true); }} />`}
