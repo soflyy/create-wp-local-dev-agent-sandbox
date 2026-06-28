@@ -130,7 +130,7 @@ function SessionItem({ s, selectedId, onSelect, onDelete, now }) {
           : html`<span class="sess-time" title=${`last active ${fullTime(s.lastActivityAt)}`}>${fmtAgo(s.lastActivityAt)}</span>`}
         <button class="sess-del lnk" title="Delete session" onClick=${(e) => { e.stopPropagation(); onDelete(s); }}>🗑</button>
       </div>
-      <div class="sess-sub muted"><span class="agent-tag">${s.agent === 'codex' ? 'Codex' : 'Claude'}</span> · started ${fmtAgo(s.createdAt, true)} · ${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
+      <div class="sess-sub muted"><span class="agent-tag">${agentLabel(s.agent)}</span> · started ${fmtAgo(s.createdAt, true)} · ${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
     </div>`;
 }
 
@@ -299,7 +299,7 @@ function SessionView({ session, now, onChanged, onBack, onDelete }) {
                 <button class="lnk small danger" onClick=${onDelete} title="Delete session">🗑</button>`}
         </div>
         <div class="bar-meta muted">
-          ${session.envName} · <span class="agent-tag">${session.agent === 'codex' ? 'Codex' : 'Claude'}</span> · ${session.model || 'default model'} · $${(session.costUsd || 0).toFixed(4)}
+          ${session.envName} · <span class="agent-tag">${agentLabel(session.agent)}</span> · ${session.model || 'default model'} · $${(session.costUsd || 0).toFixed(4)}
           ${session.claudeSessionId && html`· <code title="agent session id">${session.claudeSessionId.slice(0, 8)}</code>`}
         </div>
         <div class="bar-meta muted" title=${`started ${fullTime(session.createdAt)}\nlast active ${fullTime(session.lastActivityAt)}`}>
@@ -353,10 +353,10 @@ function NewSessionModal({ envs, preselect, onClose, onCreate }) {
         </label>
         <label>Agent
           <div class="agent-pick">
-            ${['claude', 'codex'].map((a) => html`
+            ${['claude', 'codex', 'opencode'].map((a) => html`
               <label class=${`agent-opt ${agent === a ? 'sel' : ''}`} key=${a}>
                 <input type="radio" name="agent" checked=${agent === a} onChange=${() => setAgent(a)} />
-                ${a === 'claude' ? 'Claude' : 'Codex'}
+                ${agentLabel(a)}
               </label>`)}
           </div>
         </label>
@@ -395,6 +395,8 @@ function fullTime(iso) {
   const t = Date.parse(iso || '');
   return isNaN(t) ? '' : new Date(t).toLocaleString();
 }
+const AGENT_LABELS = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode' };
+const agentLabel = (a) => AGENT_LABELS[a] || 'Claude';
 
 function LogViewer({ env, onClose }) {
   const [text, setText] = useState('');
@@ -560,6 +562,7 @@ function SettingsModal({ onClose, onLogout }) {
   const [ghToken, setGh] = useState('');
   const [clToken, setCl] = useState('');
   const [cxToken, setCx] = useState('');
+  const [ocToken, setOc] = useState('');
   const [wpUser, setWpUser] = useState('');
   const [wpEmail, setWpEmail] = useState('');
   const [wpPass, setWpPass] = useState('');
@@ -582,9 +585,10 @@ function SettingsModal({ onClose, onLogout }) {
       if (ghToken) body.githubToken = ghToken;
       if (clToken) body.claudeToken = clToken;
       if (cxToken) body.codexToken = cxToken;
+      if (ocToken) body.opencodeToken = ocToken;
       if (wpPass) body.wpAdminPassword = wpPass;
       const d = await api('/settings', { method: 'PUT', body: JSON.stringify(body) });
-      setS(d); setGh(''); setCl(''); setCx(''); setWpPass(''); setSaved(true);
+      setS(d); setGh(''); setCl(''); setCx(''); setOc(''); setWpPass(''); setSaved(true);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
 
@@ -603,6 +607,9 @@ function SettingsModal({ onClose, onLogout }) {
           </label>
           <label>Codex token <span class="muted small">— ${hint('codexToken')}</span>
             <input type="password" value=${cxToken} placeholder="sk-… (OpenAI API key)" onInput=${(e) => setCx(e.target.value)} />
+          </label>
+          <label>OpenCode token <span class="muted small">— ${hint('opencodeToken')}</span>
+            <input type="password" value=${ocToken} placeholder="OpenCode Zen API key (opencode.ai/auth)" onInput=${(e) => setOc(e.target.value)} />
           </label>
           <label>WordPress admin username
             <input value=${wpUser} onInput=${(e) => setWpUser(e.target.value)} />

@@ -105,17 +105,94 @@ export const AGENTS = {
       return out;
     },
   },
+  opencode: {
+    label: 'OpenCode',
+    procMatch: 'opencode run', // cmdline prefix used to reap the in-container turn
+    settingsKey: 'opencodeToken',
+    tokenEnv: 'OPENCODE_API_KEY', // OpenCode Zen gateway key
+    defaultModel: (config) => config.opencodeDefaultModel || 'opencode/claude-sonnet-4-6',
+    resumeHint: (dir, sid) => `cd ${dir} && bash scripts/in-workspace.sh opencode run -s ${sid}`,
+    buildArgs(session, prompt) {
+      const a = ['opencode', 'run', '--format', 'json', '--dangerously-skip-permissions', '--dir', AGENT_CWD];
+      if (session.model) a.push('-m', session.model);
+      if (session.claudeSessionId) a.push('-s', session.claudeSessionId);
+      a.push(prompt);
+      return a;
+    },
+    // Normalize `opencode run --format json` events → the UI's claude-shaped
+    // vocabulary. Event shapes confirmed against opencode 1.17.11 + the source
+    // (sst/opencode cli/cmd/run.ts emits {type, timestamp, sessionID, ...{part|error}}).
+    // Top-level types: step_start, text, reasoning, tool_use, step_finish, error.
+    // opencode is NOT a token stream here — `text`/`reasoning` carry the COMPLETE
+    // segment when it finishes, and `tool_use` fires only when the tool completes
+    // or errors. So we emit one assistant bubble per segment (like Codex's
+    // item.completed) and an empty `result` footer on the terminal step_finish.
+    parseLine(line, pending) {
+      let evt;
+      try { evt = JSON.parse(line); } catch { return { records: [{ type: 'raw', text: line }] }; }
+      const out = { records: [] };
+      const part = evt.part || {};
+      const sid = evt.sessionID || part.sessionID;
+      if (sid) out.sessionId = sid;
+      const assistantText = (text) => ({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+      switch (String(evt.type || '')) {
+        case 'step_start':
+          // session chip, once — sessionID rides on every event so guard on pending.
+          if (sid && !pending.ocInit) { pending.ocInit = true; out.records.push({ type: 'system', subtype: 'init', session_id: sid, model: 'opencode' }); }
+          break;
+        case 'text':
+          if (typeof part.text === 'string' && part.text) {
+            out.records.push(assistantText(part.text));
+            pending.ocText = (pending.ocText ? `${pending.ocText}\n\n` : '') + part.text;
+            out.result = pending.ocText; // store.lastResult = full answer
+          }
+          break;
+        case 'reasoning':
+          if (typeof part.text === 'string' && part.text) out.records.push(assistantText(part.text));
+          break;
+        case 'tool_use': {
+          const st = (part.state && typeof part.state === 'object') ? part.state : {};
+          const input = st.input || part.input || {};
+          const output = typeof st.output === 'string' ? trunc(st.output, 2000) : st.output;
+          out.records.push({ type: 'assistant', message: { content: [{ type: 'tool_use', name: part.tool || 'tool', input: { ...input, _status: st.status, _output: output } }] } });
+          break;
+        }
+        case 'step_finish': {
+          const cost = Number(part.cost) || 0;
+          if (cost) out.addCost = cost;
+          pending.ocCost = (pending.ocCost || 0) + cost;
+          // reason 'tool-calls' = an intermediate step (more turns follow); anything
+          // else (stop/length/…) is terminal → emit the footer. Text lives in the
+          // assistant bubbles above, so result is empty (mirrors Codex).
+          if (part.reason && part.reason !== 'tool-calls') {
+            out.records.push({ type: 'result', result: '', total_cost_usd: pending.ocCost, usage: part.tokens });
+          }
+          break;
+        }
+        case 'error':
+        case 'session.error': {
+          const e = evt.error || {};
+          out.errorText = String((e.data && e.data.message) || e.message || e.name || (typeof e === 'string' ? e : JSON.stringify(e)) || 'opencode error');
+          out.records.push({ type: 'stderr', text: out.errorText });
+          break;
+        }
+        default:
+          break; // step parts we don't render
+      }
+      return out;
+    },
+  },
 };
 
 const agentFor = (name) => AGENTS[name] || AGENTS.claude;
 
-// Reap any in-container agent turn (claude OR codex) for this env. Best-effort.
+// Reap any in-container agent turn (claude / codex / opencode) for this env. Best-effort.
 const REAP_AGENTS = `self=$$
 for sig in TERM KILL; do
   for d in /proc/[0-9]*; do
     pid=\${d#/proc/}; [ "$pid" = "$self" ] && continue
     c=$(tr '\\0' ' ' < "$d/cmdline" 2>/dev/null)
-    case "$c" in "claude -p "*|"codex exec"*) kill -$sig "$pid" 2>/dev/null ;; esac
+    case "$c" in "claude -p "*|"codex exec"*|"opencode run"*) kill -$sig "$pid" 2>/dev/null ;; esac
   done
   [ "$sig" = TERM ] && sleep 1
 done`;
@@ -246,7 +323,7 @@ export class ClaudeEngine {
 
   // Parse one stdout line via the agent, record its events, capture state.
   _handleLine(session, agent, line, ndjson, pending) {
-    const { records = [], sessionId, result, addCost, errorText } = agent.parseLine(line);
+    const { records = [], sessionId, result, addCost, errorText } = agent.parseLine(line, pending);
     for (const rec of records) {
       ndjson.write(JSON.stringify(rec) + '\n');
       this.bus.publish(session.id, rec);

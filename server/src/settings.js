@@ -18,13 +18,14 @@ import { createMutex } from './registry.js';
 
 // Fields treated as secrets: masked in API responses, only overwritten when a
 // non-empty value is supplied, and fed to the log redactor.
-const SECRET_FIELDS = ['githubToken', 'claudeToken', 'codexToken', 'wpAdminPassword'];
+const SECRET_FIELDS = ['githubToken', 'claudeToken', 'codexToken', 'opencodeToken', 'wpAdminPassword'];
 
 function defaults() {
   return {
     githubToken: '',
     claudeToken: '',
     codexToken: '',
+    opencodeToken: '',
     wpAdminUser: 'admin',
     wpAdminPassword: 'password',
     wpAdminEmail: 'admin@example.com',
@@ -73,6 +74,7 @@ export class SettingsStore {
       githubToken: mask(s.githubToken),
       claudeToken: mask(s.claudeToken),
       codexToken: mask(s.codexToken),
+      opencodeToken: mask(s.opencodeToken),
       wpAdminUser: s.wpAdminUser,
       wpAdminEmail: s.wpAdminEmail,
       wpAdminPassword: mask(s.wpAdminPassword),

@@ -32,11 +32,11 @@ RUN printf 'path: /home/node/wp\n' > /etc/wp-cli.yml
 # Composer (PHP dependency manager), available globally as `composer`.
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
 
-# Claude Code + OpenAI Codex (both headless agents), plus the mcp-wordpress-remote
-# stdio proxy the workspace's Claude uses to reach the site's MCP server.
-# Pre-installing the proxy means the `npx @automattic/mcp-wordpress-remote` in
-# connect-mcp.sh resolves instantly (and offline) instead of fetching on first use.
-RUN npm install -g @anthropic-ai/claude-code @openai/codex @automattic/mcp-wordpress-remote
+# Headless coding agents — Claude Code, OpenAI Codex, and opencode — plus the
+# mcp-wordpress-remote stdio proxy the workspace agents use to reach the site's
+# MCP server. Pre-installing the proxy means the `npx @automattic/mcp-wordpress-remote`
+# in connect-mcp.sh resolves instantly (and offline) instead of fetching on first use.
+RUN npm install -g @anthropic-ai/claude-code @openai/codex opencode-ai @automattic/mcp-wordpress-remote
 
 # Seed Claude's onboarding flags so a token-authenticated profile
 # (CLAUDE_CODE_OAUTH_TOKEN) goes straight to the prompt instead of stopping on the
