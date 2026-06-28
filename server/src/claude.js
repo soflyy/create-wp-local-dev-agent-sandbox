@@ -119,41 +119,65 @@ export const AGENTS = {
       a.push(prompt);
       return a;
     },
-    // PROVISIONAL mapping. opencode `run --format json` emits {type, properties}
-    // events. Confirmed: error = {type:'error', sessionID, error:{data:{message},statusCode}}.
-    // Text/tool shapes (message.part.updated → properties.part) are best-effort and
-    // get tightened against a real capture. Text streams as growing parts → emit deltas;
-    // finalize on session.idle.
+    // Normalize `opencode run --format json` events → the UI's claude-shaped
+    // vocabulary. Event shapes confirmed against opencode 1.17.11 + the source
+    // (sst/opencode cli/cmd/run.ts emits {type, timestamp, sessionID, ...{part|error}}).
+    // Top-level types: step_start, text, reasoning, tool_use, step_finish, error.
+    // opencode is NOT a token stream here — `text`/`reasoning` carry the COMPLETE
+    // segment when it finishes, and `tool_use` fires only when the tool completes
+    // or errors. So we emit one assistant bubble per segment (like Codex's
+    // item.completed) and an empty `result` footer on the terminal step_finish.
     parseLine(line, pending) {
       let evt;
       try { evt = JSON.parse(line); } catch { return { records: [{ type: 'raw', text: line }] }; }
       const out = { records: [] };
-      const p = evt.properties || {};
-      const part = p.part || evt.part || {};
-      const sid = evt.sessionID || p.sessionID || part.sessionID || (p.info && p.info.id);
+      const part = evt.part || {};
+      const sid = evt.sessionID || part.sessionID;
       if (sid) out.sessionId = sid;
-      const t = String(evt.type || '');
-      if (t === 'error' || t === 'session.error') {
-        out.errorText = String((evt.error && (evt.error.data?.message || evt.error.message || evt.error.name)) || p.error?.data?.message || 'opencode error');
-        out.records.push({ type: 'stderr', text: out.errorText });
-      } else if (t.startsWith('message.part') || t === 'part.updated') {
-        if (part.type === 'text' && typeof part.text === 'string') {
-          pending.oc = pending.oc || {};
-          const key = part.id || 'text';
-          const prev = pending.oc[key] || '';
-          if (part.text.length >= prev.length) {
-            const delta = part.text.slice(prev.length);
-            pending.oc[key] = part.text;
-            pending.ocLast = part.text;
-            out.result = part.text;
-            if (delta) out.records.push({ type: 'stream_event', event: { delta: { type: 'text_delta', text: delta } } });
+      const assistantText = (text) => ({ type: 'assistant', message: { content: [{ type: 'text', text }] } });
+      switch (String(evt.type || '')) {
+        case 'step_start':
+          // session chip, once — sessionID rides on every event so guard on pending.
+          if (sid && !pending.ocInit) { pending.ocInit = true; out.records.push({ type: 'system', subtype: 'init', session_id: sid, model: 'opencode' }); }
+          break;
+        case 'text':
+          if (typeof part.text === 'string' && part.text) {
+            out.records.push(assistantText(part.text));
+            pending.ocText = (pending.ocText ? `${pending.ocText}\n\n` : '') + part.text;
+            out.result = pending.ocText; // store.lastResult = full answer
           }
-        } else if (part.type === 'tool') {
-          out.records.push({ type: 'assistant', message: { content: [{ type: 'tool_use', name: part.tool || 'tool', input: part.state || part }] } });
+          break;
+        case 'reasoning':
+          if (typeof part.text === 'string' && part.text) out.records.push(assistantText(part.text));
+          break;
+        case 'tool_use': {
+          const st = (part.state && typeof part.state === 'object') ? part.state : {};
+          const input = st.input || part.input || {};
+          const output = typeof st.output === 'string' ? trunc(st.output, 2000) : st.output;
+          out.records.push({ type: 'assistant', message: { content: [{ type: 'tool_use', name: part.tool || 'tool', input: { ...input, _status: st.status, _output: output } }] } });
+          break;
         }
-      } else if (t === 'session.idle' || t === 'session.completed') {
-        if (pending.ocLast) out.records.push({ type: 'assistant', message: { content: [{ type: 'text', text: pending.ocLast }] } });
-        out.records.push({ type: 'result', result: pending.ocLast || '', total_cost_usd: 0 });
+        case 'step_finish': {
+          const cost = Number(part.cost) || 0;
+          if (cost) out.addCost = cost;
+          pending.ocCost = (pending.ocCost || 0) + cost;
+          // reason 'tool-calls' = an intermediate step (more turns follow); anything
+          // else (stop/length/…) is terminal → emit the footer. Text lives in the
+          // assistant bubbles above, so result is empty (mirrors Codex).
+          if (part.reason && part.reason !== 'tool-calls') {
+            out.records.push({ type: 'result', result: '', total_cost_usd: pending.ocCost, usage: part.tokens });
+          }
+          break;
+        }
+        case 'error':
+        case 'session.error': {
+          const e = evt.error || {};
+          out.errorText = String((e.data && e.data.message) || e.message || e.name || (typeof e === 'string' ? e : JSON.stringify(e)) || 'opencode error');
+          out.records.push({ type: 'stderr', text: out.errorText });
+          break;
+        }
+        default:
+          break; // step parts we don't render
       }
       return out;
     },
@@ -162,7 +186,7 @@ export const AGENTS = {
 
 const agentFor = (name) => AGENTS[name] || AGENTS.claude;
 
-// Reap any in-container agent turn (claude OR codex) for this env. Best-effort.
+// Reap any in-container agent turn (claude / codex / opencode) for this env. Best-effort.
 const REAP_AGENTS = `self=$$
 for sig in TERM KILL; do
   for d in /proc/[0-9]*; do
