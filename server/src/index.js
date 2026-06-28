@@ -65,8 +65,8 @@ async function main() {
   // When an env finishes provisioning, optionally kick off its initial session
   // (the prompt passed to POST /environments). Decoupled via this hook so the
   // manager doesn't depend on the session engine directly.
-  manager.onEnvReady = async (env, { prompt, model }) => {
-    const s = await claudeEngine.newSession(env, { prompt, model });
+  manager.onEnvReady = async (env, { prompt, model, agent }) => {
+    const s = await claudeEngine.newSession(env, { prompt, model, agent });
     log.info(`[${env.name}] started initial session ${s.id}`);
   };
 
