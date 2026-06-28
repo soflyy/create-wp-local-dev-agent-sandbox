@@ -673,6 +673,61 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
     </div>`;
 }
 
+// Warm-pool config: per-preset desired ready count + live status + rebuild.
+// Polls /pool so "building → ready" transitions show without a manual refresh.
+function WarmPoolSection() {
+  const [presets, setPresets] = useState([]);
+  const [pool, setPool] = useState([]);
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const [p, pl] = await Promise.all([api('/presets'), api('/pool')]);
+      setPresets(p.presets); setPool(pl.pool);
+    } catch (e) { setErr(e.message); }
+  }, []);
+  useEffect(() => { load(); const t = setInterval(load, 4000); return () => clearInterval(t); }, [load]);
+
+  const byId = Object.fromEntries(pool.map((r) => [r.presetId, r]));
+  const setCount = async (presetId, count) => {
+    setErr('');
+    try { const d = await api(`/pool/${presetId}`, { method: 'PUT', body: JSON.stringify({ count: parseInt(count, 10) || 0 }) }); setPool(d.pool); }
+    catch (e) { setErr(e.message); }
+  };
+  const rebuild = async (presetId, name) => {
+    if (!confirm(`Rebuild the warm pool for "${name}"? This destroys its pre-built environments and rebuilds them from scratch (each rebuild takes the full ~10-min setup).`)) return;
+    setErr('');
+    try { const d = await api(`/pool/${presetId}/rebuild`, { method: 'POST' }); setPool(d.pool); }
+    catch (e) { setErr(e.message); }
+  };
+
+  return html`
+    <div class="warmpool">
+      <h4>Warm pool</h4>
+      <p class="muted small">Keep pre-built (then stopped) environments waiting per preset, so creating one is an instant start instead of a ~10-minute build. Rebuild to refresh a pool after pushing new code that would make it stale.</p>
+      ${presets.length === 0 && html`<div class="muted small">No presets yet — create one to warm a pool.</div>`}
+      ${presets.map((p) => {
+        const st = byId[p.id] || { desired: 0, ready: 0, building: 0, failed: 0 };
+        const live = st.ready + st.building + st.failed;
+        return html`
+          <div class="wp-row" key=${p.id}>
+            <span class="wp-name" title=${p.name}>${p.name}</span>
+            <span class="wp-status muted small">
+              ${st.ready} ready${st.building ? ` · ${st.building} building` : ''}${st.failed ? ` · ${st.failed} failed` : ''}
+            </span>
+            <label class="wp-keep muted small">keep
+              <input class="wp-count" type="number" min="0" max="50" value=${st.desired}
+                onChange=${(e) => setCount(p.id, e.target.value)} title="Desired ready count" />
+            </label>
+            ${live > 0
+              ? html`<button class="lnk" onClick=${() => rebuild(p.id, p.name)}>rebuild</button>`
+              : html`<span class="wp-spacer"></span>`}
+          </div>`;
+      })}
+      ${err && html`<div class="err-msg">${err}</div>`}
+    </div>`;
+}
+
 function SettingsModal({ onClose, onLogout }) {
   const [s, setS] = useState(null);
   const [ghToken, setGh] = useState('');
@@ -710,7 +765,7 @@ function SettingsModal({ onClose, onLogout }) {
 
   return html`
     <div class="modal-bg" onClick=${onClose}>
-      <div class="modal" onClick=${(e) => e.stopPropagation()}>
+      <div class="modal settings" onClick=${(e) => e.stopPropagation()}>
         <h3>Settings</h3>
         ${!s && !err && html`<div class="muted">Loading…</div>`}
         ${s && html`
@@ -737,6 +792,7 @@ function SettingsModal({ onClose, onLogout }) {
             <input value=${wpEmail} onInput=${(e) => setWpEmail(e.target.value)} />
           </label>
           <p class="muted small">Token changes apply to newly-created environments and new Claude turns. WP-admin defaults seed new sites.</p>`}
+        <${WarmPoolSection} />
         ${err && html`<div class="err-msg">${err}</div>`}
         ${saved && html`<div class="ok-msg">Saved.</div>`}
         <div class="modal-foot">

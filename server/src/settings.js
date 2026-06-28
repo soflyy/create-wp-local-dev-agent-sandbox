@@ -29,6 +29,9 @@ function defaults() {
     wpAdminUser: 'admin',
     wpAdminPassword: 'password',
     wpAdminEmail: 'admin@example.com',
+    // Warm pool: { [presetId]: desiredReadyCount }. How many pre-built (then
+    // stopped) environments to keep waiting per preset. Empty = pooling off.
+    warmPool: {},
   };
 }
 
@@ -78,7 +81,22 @@ export class SettingsStore {
       wpAdminUser: s.wpAdminUser,
       wpAdminEmail: s.wpAdminEmail,
       wpAdminPassword: mask(s.wpAdminPassword),
+      warmPool: { ...(s.warmPool || {}) },
     };
+  }
+
+  // Set the desired warm-pool count for one preset (0 removes it). Kept separate
+  // from update() because it's config, not a masked-secret form field.
+  setWarmPool(presetId, count) {
+    return this.mutex(async () => {
+      const n = Math.max(0, Math.min(50, parseInt(count, 10) || 0));
+      const warmPool = { ...(this.data.settings.warmPool || {}) };
+      if (n === 0) delete warmPool[presetId];
+      else warmPool[presetId] = n;
+      this.data.settings = { ...this.data.settings, warmPool };
+      await this._persist();
+      return warmPool;
+    });
   }
 
   // Apply a patch from the Settings form. Non-secret fields are set when a

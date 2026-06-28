@@ -48,6 +48,7 @@ async function main() {
   }).load();
   addSecrets(settings.secrets()); // redact the stored tokens from logs too
   const manager = new Manager(config, registry, settings);
+  manager.presets = presets; // warm-pool builder reads preset definitions
 
   // Claude session subsystem.
   const sessionStore = await new SessionStore(config.sessionsPath).load();
@@ -80,6 +81,7 @@ async function main() {
         `max: ${config.maxEnvironments} | auth: ${config.apiToken ? 'bearer' : 'none'} | UI: http://${config.bind}:${config.port}/`,
     );
     manager.startReconcileLoop();
+    manager.startPoolLoop();
   });
 
   // On a plain restart (Ctrl+C / SIGTERM) we reap the in-container agent turns

@@ -149,6 +149,18 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .custom-prov summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 .modal .save-preset { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
 .modal .save-preset .btn { white-space: nowrap; }
+.modal.settings { max-height: 90vh; overflow-y: auto; }
+
+/* warm pool (Settings) */
+.warmpool { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.warmpool h4 { margin: 0 0 4px; font-size: 13px; }
+.wp-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+.wp-name { font-weight: 600; max-width: 36%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wp-status { flex: 1; }
+.wp-keep { display: flex; align-items: center; gap: 6px; margin: 0; }
+.wp-count { width: 56px; }
+.warmpool .wp-keep input { width: 56px; }
+.wp-spacer { width: 44px; }
 .modal.logs { width: 820px; }
 .logbox { margin-top: 8px; max-height: 62vh; overflow: auto; background: var(--bg);
   border: 1px solid var(--line); border-radius: 8px; padding: 10px; color: var(--text); }

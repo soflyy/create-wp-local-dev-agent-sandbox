@@ -11,6 +11,7 @@ The server is a **thin orchestrator over the scaffolded project's own scripts**:
 - **Create**: runs the standard scaffolder once — `node ../index.js <dir> --port=N` — which scaffolds **and** `npm run setup` (build + boot + provision). Default compose project = the env name. Bounded by a build semaphore.
 - **Git auth**: configures `gh` + git identity inside the workspace from the shared `GITHUB_TOKEN` (non-fatal).
 - **Provisioning via presets**: an environment is provisioned by the **presets** chosen at create time (composable — pick several, applied in order). A preset carries a setup script, a long-running dev script, wp-config defines, and an ordered plugin-activation list. Built-ins include **Oxygen** (build Breakdance/Oxygen from source) and **Agent Connector (dev)** (replace the release-zip gateway with a live git checkout — clone → `composer install --no-dev` → symlink into `wp-content/plugins` → activate). Presets live in `data/presets.json`, managed in the UI / via `/presets`.
+- **Warm pool**: provisioning a fresh env takes minutes (build + WP setup). To make creation instant, the server keeps a configurable number of **pre-built, then stopped** envs waiting per preset (set per preset in Settings, or via `PUT /pool/:presetId`). A create that matches a single warmed preset (no custom overrides) **claims** a ready env and just `start`s it (cached, seconds) instead of building; the pool refills in the background, bounded by the build semaphore and leaving `WARM_POOL_RESERVE` free slots for on-demand creates. Pushed new code and the pool is stale? `POST /pool/:presetId/rebuild` (or the Settings button) nukes and rebuilds it. Warm members are tagged in the registry and hidden from the env list.
 - **Claude sessions**: each user message spawns `claude -p [--resume <id>] --output-format stream-json …` via the env's own `scripts/in-workspace.sh` (so auth = the proven token path; the server holds no Claude token). stdout is streamed to the browser over **SSE**; the session id + result + cost are persisted (`data/sessions.json`, raw events in `data/sessions/<id>.ndjson`). Resumable from the UI **and** by SSH (`bash scripts/in-workspace.sh claude --resume <id>`).
 - **Turn lifecycle / reaping**: a `claude -p` turn runs *inside* the workspace container, so it survives a server restart. The server reaps in-container turns on **interrupt**, on **shutdown**, and on **startup** (any `claude -p` still running when the server boots is an orphan from a previous run) — so a resume never spawns a duplicate that races the orphan. A plain restart (Ctrl+C) reaps turns but leaves the env containers up, so sessions resume cleanly.
 - **Control / shutdown**: `POST /control/interrupt-all` (stop all turns), `/control/stop-all` (stop every env's containers), `/control/shutdown` (stop everything + exit the process) — surfaced as buttons on the Health screen.
@@ -35,6 +36,8 @@ The server is a **thin orchestrator over the scaffolded project's own scripts**:
 | `SCAFFOLDER_DIR` | repo root | path to the scaffolder (`index.js`) |
 | `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` | `devbox` / `devbox@localhost` | commit identity |
 | `RECONCILE_INTERVAL_MS` | `45000` | status reconcile loop interval |
+| `WARM_POOL_RESERVE` | `5` | free env slots the warm pool leaves for on-demand creates (it won't fill past `MAX_ENVIRONMENTS − reserve`) |
+| `WARM_POOL_INTERVAL_MS` | `20000` | warm-pool top-up loop interval |
 
 ## Run
 
@@ -84,6 +87,9 @@ DEVBOX_API_TOKEN=secret GITHUB_TOKEN=… npm start
 | `DELETE` | `/sessions/:id` | forget the session |
 | `GET` | `/host` | system health: memory/CPU/disk, docker df, per-env container memory, RAM-headroom estimate |
 | `GET` / `PUT` | `/settings` | tokens + WP-admin defaults (secrets masked on read) |
+| `GET` | `/pool` | warm-pool status per preset `{presetId,name,desired,ready,building,failed}` |
+| `PUT` | `/pool/:presetId` | `{count}` → set how many pre-built envs to keep ready (0 = off) |
+| `POST` | `/pool/:presetId/rebuild` | destroy that preset's warm envs (stale code) → the loop refills |
 | `POST` | `/control/interrupt-all` | interrupt every running Claude turn (containers stay up) |
 | `POST` | `/control/stop-all` | stop every env's containers (and interrupt their turns) |
 | `POST` | `/control/shutdown` | full teardown: stop everything + exit the server process |

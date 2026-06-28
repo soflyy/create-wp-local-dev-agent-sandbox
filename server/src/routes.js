@@ -8,6 +8,7 @@ import { exec } from './docker.js';
 import { systemHealth } from './health.js';
 import { AGENTS } from './claude.js';
 import { AllocationError } from './allocator.js';
+import { composeProvision } from './provision.js';
 import { openSse } from './sse.js';
 import { makeStaticHandler } from './static.js';
 
@@ -105,6 +106,17 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
         const prompt = typeof ctx.body.prompt === 'string' ? ctx.body.prompt.trim() : '';
         const model = typeof ctx.body.model === 'string' && ctx.body.model.trim() ? ctx.body.model.trim() : undefined;
         const agent = AGENTS[ctx.body.agent] ? ctx.body.agent : undefined; // first-prompt session agent; else default
+
+        // Warm-pool fast path: a single preset with no custom overrides can claim
+        // a pre-built env and just start it (seconds) instead of building (~10m).
+        if (presetIds.length === 1 && !custom) {
+          const claimed = await manager.claimAndStart(presetIds[0], { name: ctx.body.name, prompt: prompt || undefined, model, agent });
+          if (claimed) {
+            ctx.send(202, { id: claimed.id, name: claimed.name, port: claimed.port, wpUrl: claimed.wpUrl, status: 'configuring', warm: true });
+            return;
+          }
+        }
+
         const record = await manager.createEnvironment({ name: ctx.body.name, provision, prompt: prompt || undefined, model, agent });
         ctx.send(202, { id: record.id, name: record.name, port: record.port, wpUrl: record.wpUrl, status: record.status });
       } catch (err) {
@@ -180,6 +192,24 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
     route('DELETE', '/presets/:id', async (ctx) => {
       if (!(await presets.remove(ctx.params.id))) throw httpErr(404, `preset "${ctx.params.id}" not found`);
       ctx.send(200, { deleted: true });
+    }),
+
+    // ---- warm pool (pre-built envs waiting per preset) --------------------
+    // Live status (desired/ready/building/failed per preset) for the UI.
+    route('GET', '/pool', async (ctx) => ctx.send(200, { pool: manager.poolStatus() })),
+    // Set the desired ready count for a preset (0 turns its pool off).
+    route('PUT', '/pool/:id', async (ctx) => {
+      if (!presets.get(ctx.params.id)) throw httpErr(404, `preset "${ctx.params.id}" not found`);
+      const count = Math.max(0, Math.min(50, parseInt(ctx.body.count, 10) || 0));
+      await settings.setWarmPool(ctx.params.id, count);
+      manager.maintainPoolSoon();
+      ctx.send(200, { pool: manager.poolStatus() });
+    }),
+    // Nuke a preset's warm envs (rebuild after stale code); the loop refills.
+    route('POST', '/pool/:id/rebuild', async (ctx) => {
+      if (!presets.get(ctx.params.id)) throw httpErr(404, `preset "${ctx.params.id}" not found`);
+      const removed = await manager.rebuildPool(ctx.params.id);
+      ctx.send(200, { rebuilt: removed, pool: manager.poolStatus() });
     }),
 
     // ---- agent sessions (claude | codex) ----------------------------------
@@ -327,37 +357,6 @@ function normalizeProvision(body) {
   return { setupScript, devScript, activate, defines };
 }
 
-// Compose selected presets (in order) + optional custom fields into one provision:
-// setup scripts run sequentially, dev scripts run concurrently in the single dev
-// container, defines merge (later wins), activate lists concatenate (deduped).
-// Returns null when there's nothing to provision. Exported for testing.
-export function composeProvision(presets, custom) {
-  const parts = presets.map((p) => ({
-    label: p.name, setupScript: p.setupScript, devScript: p.devScript, defines: p.defines, activate: p.activate,
-  }));
-  if (custom) parts.push({ label: 'Custom', ...custom });
-  if (!parts.length) return null;
-
-  const setupChunks = parts
-    .filter((p) => p.setupScript && p.setupScript.trim())
-    .map((p) => `# ===== ${p.label} =====\n${p.setupScript.trim()}\n`);
-  const setupScript = setupChunks.length
-    ? `#!/usr/bin/env bash\nset -euo pipefail\n\n${setupChunks.join('\n')}`
-    : '';
-
-  const devs = parts.filter((p) => p.devScript && p.devScript.trim());
-  let devScript = '';
-  if (devs.length === 1) devScript = devs[0].devScript;
-  else if (devs.length > 1) {
-    devScript = '#!/usr/bin/env bash\n# composed dev scripts — run concurrently in one dev container\n'
-      + devs.map((d) => `# --- ${d.label} ---\n(\n${d.devScript.trim()}\n) &`).join('\n')
-      + '\nwait\n';
-  }
-
-  const defines = Object.assign({}, ...parts.map((p) => p.defines || {}));
-  const activate = [];
-  for (const p of parts) for (const s of p.activate || []) if (!activate.includes(s)) activate.push(s);
-
-  if (!setupScript && !devScript && !activate.length && !Object.keys(defines).length) return null;
-  return { setupScript, devScript, defines, activate, presetName: presets.map((p) => p.name).join(' + ') || null };
-}
+// composeProvision lives in provision.js (shared with the warm-pool builder in
+// manager.js); re-exported here for any existing importers/tests.
+export { composeProvision };
