@@ -24,6 +24,13 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .section-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 .small { font-size: 12px; }
 
+/* environment list filter (active / stopped / all) */
+.env-filter { display: flex; gap: 4px; padding: 0 12px 8px; }
+.env-filter .seg { flex: 1; background: var(--panel2); border: 1px solid var(--line); color: var(--muted);
+  cursor: pointer; font-size: 11px; padding: 4px 6px; border-radius: 6px; text-align: center; }
+.env-filter .seg:hover { color: var(--text); }
+.env-filter .seg.on { background: var(--accent); border-color: var(--accent); color: #07101f; font-weight: 600; }
+
 /* environment rows */
 .env { padding: 7px 12px; border-top: 1px solid var(--line); }
 .env-top { display: flex; align-items: center; gap: 7px; }

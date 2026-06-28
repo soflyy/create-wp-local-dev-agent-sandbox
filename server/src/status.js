@@ -46,6 +46,9 @@ export function publicView(record, { status }) {
   return {
     id: record.id,
     name: record.name,
+    // Optional user-set list label; the canonical `name` (dir + compose project)
+    // never changes. UI shows displayName when present, else name.
+    displayName: record.displayName || null,
     port: record.port,
     wpUrl: record.wpUrl,
     status,

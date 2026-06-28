@@ -92,7 +92,7 @@ function EnvRow({ env, onAction }) {
   return html`
     <div class="env">
       <div class="env-top">
-        <${StatusDot} status=${env.status} /> <span class="env-name">${env.name}</span>
+        <${StatusDot} status=${env.status} /> <span class="env-name" title=${env.displayName ? `${env.displayName} · ${env.name}` : env.name}>${env.displayName || env.name}</span>
         ${env.preset && html`<span class="badge" title="provisioned from preset">${env.preset}</span>`}
         <a class="env-port" href=${wpUrl} target="_blank" rel="noreferrer" title="Open the site front end" onClick=${(e) => e.stopPropagation()}>:${env.port}</a>
         ${up && html`<button class="env-admin lnk" title="One-click passwordless wp-admin login" onClick=${(e) => { e.stopPropagation(); onAction('admin-login', env); }}>admin ↗</button>`}
@@ -106,6 +106,7 @@ function EnvRow({ env, onAction }) {
             ${up && html`<button class="lnk" onClick=${() => onAction('stop', env)}>stop</button>`}
             ${env.status === 'stopped' && html`<button class="lnk" onClick=${() => onAction('start', env)}>start</button>`}
             ${env.status === 'failed' && html`<button class="lnk" onClick=${() => onAction('start', env)}>retry</button>`}
+            <button class="lnk" onClick=${() => onAction('rename', env)}>rename</button>
             <button class="lnk" onClick=${() => onAction('logs', env)}>logs</button>
             <button class="lnk danger" onClick=${() => onAction('delete', env)}>delete</button>`}
       </div>
@@ -136,6 +137,13 @@ function SessionItem({ s, selectedId, onSelect, onDelete, now }) {
 
 function Sidebar({ sessions, envs, selectedId, now, onSelect, onNewEnv, onEnvAction, onSettings, onHealth, onDeleteSession }) {
   const [expanded, setExpanded] = useState(() => new Set());
+  // Declutter long lists: stopped envs (data intact, just parked) are hidden by
+  // default. "Active" = anything not stopped (running/degraded/building/failed).
+  const [filter, setFilter] = useState('active');
+  const activeCount = envs.filter((e) => e.status !== 'stopped').length;
+  const stoppedCount = envs.length - activeCount;
+  const shown = envs.filter((e) =>
+    filter === 'all' ? true : filter === 'stopped' ? e.status === 'stopped' : e.status !== 'stopped');
   const toggle = (id) => setExpanded((prev) => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -156,9 +164,15 @@ function Sidebar({ sessions, envs, selectedId, now, onSelect, onNewEnv, onEnvAct
       </div>
       <div class="side-section grow">
         <div class="section-head"><span>Environments</span><button class="btn small" onClick=${onNewEnv}>+ Env</button></div>
+        <div class="env-filter">
+          <button class=${`seg ${filter === 'active' ? 'on' : ''}`} onClick=${() => setFilter('active')}>Active ${activeCount}</button>
+          <button class=${`seg ${filter === 'stopped' ? 'on' : ''}`} onClick=${() => setFilter('stopped')}>Stopped ${stoppedCount}</button>
+          <button class=${`seg ${filter === 'all' ? 'on' : ''}`} onClick=${() => setFilter('all')}>All ${envs.length}</button>
+        </div>
         <div class="side-list">
           ${envs.length === 0 && html`<div class="muted pad small">No environments — create one.</div>`}
-          ${envs.map((e) => {
+          ${envs.length > 0 && shown.length === 0 && html`<div class="muted pad small">No ${filter} environments.</div>`}
+          ${shown.map((e) => {
             const envSessions = sessions
               .filter((s) => s.envId === e.id)
               .sort((a, b) => String(b.lastActivityAt || '').localeCompare(String(a.lastActivityAt || '')));
@@ -850,6 +864,25 @@ function TokenGate({ onSave }) {
     </div>`;
 }
 
+function RenameEnvModal({ env, onClose, onSave }) {
+  const [val, setVal] = useState(env.displayName || env.name);
+  const save = () => onSave(env, val.trim());
+  return html`
+    <div class="modal-bg" onClick=${onClose}>
+      <div class="modal" onClick=${(e) => e.stopPropagation()}>
+        <h3>Rename environment</h3>
+        <p class="muted small">List label only. The canonical name <code>${env.name}</code> (its directory and Docker project) is unchanged. Leave blank to reset to it.</p>
+        <input autofocus value=${val} placeholder=${env.name}
+          onInput=${(e) => setVal(e.target.value)}
+          onKeyDown=${(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') onClose(); }} />
+        <div class="modal-foot">
+          <button class="btn ghost" onClick=${onClose}>Cancel</button>
+          <button class="btn" onClick=${save}>Save</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 function App() {
   const [sessions, setSessions] = useState([]);
   const [envs, setEnvs] = useState([]);
@@ -858,6 +891,7 @@ function App() {
   const [newSession, setNewSession] = useState(null); // null | { preselect? }
   const [showNewEnv, setShowNewEnv] = useState(false);
   const [logEnvId, setLogEnvId] = useState(null);
+  const [renameEnv, setRenameEnv] = useState(null);
   const [needToken, setNeedToken] = useState(false);
   const [authed, setAuthed] = useState(!!token.get());
   const [showSettings, setShowSettings] = useState(false);
@@ -889,6 +923,12 @@ function App() {
   const createSession = async (envId, prompt, agent, model) => {
     const s = await api(`/environments/${envId}/sessions`, { method: 'POST', body: JSON.stringify({ prompt, agent, model }) });
     setNewSession(null); await refresh(); setSelectedId(s.id);
+  };
+  const renameEnvironment = async (env, displayName) => {
+    try {
+      await api(`/environments/${env.id}`, { method: 'PATCH', body: JSON.stringify({ displayName }) });
+      setRenameEnv(null); await refresh();
+    } catch (e) { alert(`Rename failed: ${e.message}`); }
   };
   const createEnv = async (name, provision, prompt, presetIds, agent, model) => {
     await api('/environments', { method: 'POST', body: JSON.stringify({ name, provision, prompt, presetIds, agent, model }) });
@@ -932,11 +972,12 @@ function App() {
     }
     try {
       if (action === 'logs') return setLogEnvId(env.id);
+      if (action === 'rename') return setRenameEnv(env);
       if (action === 'session') return setNewSession({ preselect: env.id });
       if (action === 'start') await api(`/environments/${env.id}/start`, { method: 'POST' });
       if (action === 'stop') await api(`/environments/${env.id}/stop`, { method: 'POST' });
       if (action === 'delete') {
-        if (!confirm(`Destroy environment "${env.name}"? This removes its containers and all its data.`)) return;
+        if (!confirm(`Destroy environment "${env.displayName || env.name}"? This removes its containers and all its data.`)) return;
         await api(`/environments/${env.id}`, { method: 'DELETE' });
       }
       refresh();
@@ -958,6 +999,7 @@ function App() {
       ${newSession && html`<${NewSessionModal} envs=${envs} preselect=${newSession.preselect} onClose=${() => setNewSession(null)} onCreate=${createSession} />`}
       ${showNewEnv && html`<${NewEnvModal} presets=${presets} onClose=${() => setShowNewEnv(false)} onCreate=${createEnv} onSavePreset=${savePreset} onDeletePreset=${deletePreset} />`}
       ${logEnvId && logEnv && html`<${LogViewer} env=${logEnv} onClose=${() => setLogEnvId(null)} />`}
+      ${renameEnv && html`<${RenameEnvModal} env=${renameEnv} onClose=${() => setRenameEnv(null)} onSave=${renameEnvironment} />`}
       ${showSettings && html`<${SettingsModal} onClose=${() => setShowSettings(false)}
         onLogout=${() => { token.set(''); setShowSettings(false); setAuthed(false); setNeedToken(true); }} />`}
       ${showHealth && html`<${HealthModal} onClose=${() => setShowHealth(false)} />`}

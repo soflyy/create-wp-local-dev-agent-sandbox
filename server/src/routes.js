@@ -140,6 +140,15 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
     }),
     route('POST', '/environments/:id/stop', async (ctx) => ctx.send(200, await manager.stop(envOr404(ctx)))),
     route('POST', '/environments/:id/start', async (ctx) => ctx.send(200, await manager.start(envOr404(ctx)))),
+
+    // Rename the list label only — canonical name/dir/compose project are untouched.
+    // Blank resets to the canonical name (displayName -> null).
+    route('PATCH', '/environments/:id', async (ctx) => {
+      const env = envOr404(ctx);
+      const label = String(ctx.body.displayName ?? '').replace(/\s+/g, ' ').trim();
+      const updated = await registry.update(env.id, { displayName: label ? label.slice(0, 80) : null });
+      ctx.send(200, await manager.describe(updated));
+    }),
     route('DELETE', '/environments/:id', async (ctx) => {
       const env = envOr404(ctx);
       // Sessions are tied to their environment: destroying it deletes them all.
