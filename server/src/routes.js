@@ -104,7 +104,8 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
         const provision = composeProvision(selected, custom);
         const prompt = typeof ctx.body.prompt === 'string' ? ctx.body.prompt.trim() : '';
         const model = typeof ctx.body.model === 'string' && ctx.body.model.trim() ? ctx.body.model.trim() : undefined;
-        const record = await manager.createEnvironment({ name: ctx.body.name, provision, prompt: prompt || undefined, model });
+        const agent = AGENTS[ctx.body.agent] ? ctx.body.agent : undefined; // first-prompt session agent; else default
+        const record = await manager.createEnvironment({ name: ctx.body.name, provision, prompt: prompt || undefined, model, agent });
         ctx.send(202, { id: record.id, name: record.name, port: record.port, wpUrl: record.wpUrl, status: record.status });
       } catch (err) {
         if (err instanceof AllocationError) throw httpErr(err.status, err.message);

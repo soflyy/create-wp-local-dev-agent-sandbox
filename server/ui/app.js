@@ -335,11 +335,12 @@ function NewSessionModal({ envs, preselect, onClose, onCreate }) {
   const usable = envs.filter((e) => e.status === 'running' || e.status === 'degraded');
   const [envId, setEnvId] = useState(preselect || (usable[0] && usable[0].id));
   const [agent, setAgent] = useState('claude');
+  const [model, setModel] = useState('');
   const [prompt, setPrompt] = useState('');
   const [err, setErr] = useState('');
   const create = async () => {
     if (!envId || !prompt.trim()) return;
-    try { await onCreate(envId, prompt.trim(), agent); } catch (e) { setErr(e.message); }
+    try { await onCreate(envId, prompt.trim(), agent, model.trim() || undefined); } catch (e) { setErr(e.message); }
   };
   return html`
     <div class="modal-bg" onClick=${onClose}>
@@ -351,18 +352,9 @@ function NewSessionModal({ envs, preselect, onClose, onCreate }) {
             ${usable.map((e) => html`<option value=${e.id} key=${e.id}>${e.name} (:${e.port})</option>`)}
           </select>
         </label>
-        <label>Agent
-          <div class="agent-pick">
-            ${['claude', 'codex', 'opencode'].map((a) => html`
-              <label class=${`agent-opt ${agent === a ? 'sel' : ''}`} key=${a}>
-                <input type="radio" name="agent" checked=${agent === a} onChange=${() => setAgent(a)} />
-                ${agentLabel(a)}
-              </label>`)}
-          </div>
-        </label>
-        <label>First message
-          <textarea value=${prompt} rows="4" onInput=${(e) => setPrompt(e.target.value)} placeholder="Describe the task…"></textarea>
-        </label>
+        <${AgentPicker} agent=${agent} model=${model} prompt=${prompt}
+          onAgent=${setAgent} onModel=${setModel} onPrompt=${setPrompt}
+          promptLabel="First message" />
         ${err && html`<div class="err-msg">${err}</div>`}
         <div class="modal-foot">
           <button class="btn ghost" onClick=${onClose}>Cancel</button>
@@ -397,6 +389,112 @@ function fullTime(iso) {
 }
 const AGENT_LABELS = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode' };
 const agentLabel = (a) => AGENT_LABELS[a] || 'Claude';
+const AGENTS_ORDER = ['claude', 'codex', 'opencode'];
+
+// Curated model choices per agent. The first entry (id '') means "let the agent /
+// server default decide". A "Custom…" escape hatch lets you type any id, except
+// for agents in NO_CUSTOM_MODEL. Set only at session start. The OpenCode (Zen)
+// list is the subset verified usable with our Zen key (see its comment below).
+const MODELS = {
+  claude: [
+    { id: '', label: 'Default' },
+    { id: 'opus', label: 'Opus 4.8' },
+    { id: 'sonnet', label: 'Sonnet 4.6' },
+    { id: 'haiku', label: 'Haiku 4.5' },
+  ],
+  codex: [
+    { id: '', label: 'Default' },
+    { id: 'gpt-5.5', label: 'gpt-5.5' },
+    { id: 'gpt-5.4', label: 'gpt-5.4' },
+    { id: 'gpt-5.4-mini', label: 'gpt-5.4-mini' },
+    { id: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark (ChatGPT sign-in only)' },
+  ],
+  // OpenCode (Zen) — the models verified usable with our Zen key (probed via
+  // `opencode run -m opencode/<id>`; the gateway catalog is a superset that
+  // includes gated/retired models that error on use). Custom… stays available
+  // for anything new. Re-probe to refresh: scratchpad/probe2.sh.
+  opencode: [
+    { id: '', label: 'Default (Claude Sonnet 4.6)' },
+    { id: 'opencode/claude-opus-4-8', label: 'claude-opus-4-8' },
+    { id: 'opencode/claude-opus-4-7', label: 'claude-opus-4-7' },
+    { id: 'opencode/claude-opus-4-6', label: 'claude-opus-4-6' },
+    { id: 'opencode/claude-opus-4-5', label: 'claude-opus-4-5' },
+    { id: 'opencode/claude-opus-4-1', label: 'claude-opus-4-1' },
+    { id: 'opencode/claude-sonnet-4-6', label: 'claude-sonnet-4-6' },
+    { id: 'opencode/claude-sonnet-4-5', label: 'claude-sonnet-4-5' },
+    { id: 'opencode/claude-haiku-4-5', label: 'claude-haiku-4-5' },
+    { id: 'opencode/gemini-3.5-flash', label: 'gemini-3.5-flash' },
+    { id: 'opencode/gemini-3.1-pro', label: 'gemini-3.1-pro' },
+    { id: 'opencode/gemini-3-flash', label: 'gemini-3-flash' },
+    { id: 'opencode/gpt-5.5', label: 'gpt-5.5' },
+    { id: 'opencode/gpt-5.5-pro', label: 'gpt-5.5-pro' },
+    { id: 'opencode/gpt-5.4', label: 'gpt-5.4' },
+    { id: 'opencode/gpt-5.4-pro', label: 'gpt-5.4-pro' },
+    { id: 'opencode/gpt-5.4-mini', label: 'gpt-5.4-mini' },
+    { id: 'opencode/gpt-5.4-nano', label: 'gpt-5.4-nano' },
+    { id: 'opencode/gpt-5.3-codex', label: 'gpt-5.3-codex' },
+    { id: 'opencode/gpt-5.2', label: 'gpt-5.2' },
+    { id: 'opencode/gpt-5.2-codex', label: 'gpt-5.2-codex' },
+    { id: 'opencode/gpt-5.1', label: 'gpt-5.1' },
+    { id: 'opencode/gpt-5.1-codex-max', label: 'gpt-5.1-codex-max' },
+    { id: 'opencode/gpt-5.1-codex', label: 'gpt-5.1-codex' },
+    { id: 'opencode/gpt-5.1-codex-mini', label: 'gpt-5.1-codex-mini' },
+    { id: 'opencode/gpt-5', label: 'gpt-5' },
+    { id: 'opencode/gpt-5-codex', label: 'gpt-5-codex' },
+    { id: 'opencode/gpt-5-nano', label: 'gpt-5-nano' },
+    { id: 'opencode/grok-build-0.1', label: 'grok-build-0.1' },
+    { id: 'opencode/deepseek-v4-pro', label: 'deepseek-v4-pro' },
+    { id: 'opencode/deepseek-v4-flash', label: 'deepseek-v4-flash' },
+    { id: 'opencode/glm-5.2', label: 'glm-5.2' },
+    { id: 'opencode/glm-5.1', label: 'glm-5.1' },
+    { id: 'opencode/glm-5', label: 'glm-5' },
+    { id: 'opencode/minimax-m2.7', label: 'minimax-m2.7' },
+    { id: 'opencode/kimi-k2.6', label: 'kimi-k2.6' },
+    { id: 'opencode/kimi-k2.5', label: 'kimi-k2.5' },
+    { id: 'opencode/qwen3.6-plus', label: 'qwen3.6-plus' },
+    { id: 'opencode/qwen3.5-plus', label: 'qwen3.5-plus' },
+    { id: 'opencode/big-pickle', label: 'big-pickle' },
+    { id: 'opencode/deepseek-v4-flash-free', label: 'deepseek-v4-flash-free' },
+    { id: 'opencode/mimo-v2.5-free', label: 'mimo-v2.5-free' },
+    { id: 'opencode/nemotron-3-ultra-free', label: 'nemotron-3-ultra-free' },
+    { id: 'opencode/north-mini-code-free', label: 'north-mini-code-free' },
+  ],
+};
+// Agents whose model list is fixed — no free-text "Custom…" option.
+const NO_CUSTOM_MODEL = new Set(['codex']);
+const MODEL_CUSTOM = '__custom__';
+
+// Shared agent + model + first-message chooser, used by both the New Session and
+// New Environment dialogs so the choices stay identical. Controlled: the parent
+// owns agent/model/prompt state (it submits them). Model is start-only by design —
+// there's no editor for it after a session begins.
+function AgentPicker({ agent, model, prompt, onAgent, onModel, onPrompt, promptLabel = 'First message', promptHint = '', promptRows = 4, promptPlaceholder = 'Describe the task…' }) {
+  const [custom, setCustom] = useState(false);
+  const list = MODELS[agent] || MODELS.claude;
+  const allowCustom = !NO_CUSTOM_MODEL.has(agent);
+  const pickAgent = (a) => { onAgent(a); onModel(''); setCustom(false); }; // reset model to default
+  const pickModel = (v) => { if (v === MODEL_CUSTOM) { setCustom(true); onModel(''); } else { setCustom(false); onModel(v); } };
+  return html`
+    <div class="row two">
+      <label>Agent
+        <select value=${agent} onChange=${(e) => pickAgent(e.target.value)}>
+          ${AGENTS_ORDER.map((a) => html`<option value=${a} key=${a}>${agentLabel(a)}</option>`)}
+        </select>
+      </label>
+      <label>Model
+        <select value=${custom ? MODEL_CUSTOM : model} onChange=${(e) => pickModel(e.target.value)}>
+          ${list.map((m) => html`<option value=${m.id} key=${m.id || 'default'}>${m.label}</option>`)}
+          ${allowCustom && html`<option value=${MODEL_CUSTOM}>Custom…</option>`}
+        </select>
+      </label>
+    </div>
+    ${custom && html`<label>Custom model id
+      <input value=${model} placeholder=${agent === 'opencode' ? 'opencode/provider-model' : 'model id'} onInput=${(e) => onModel(e.target.value)} />
+    </label>`}
+    <label>${promptLabel}${promptHint && html` <span class="muted small">${promptHint}</span>`}
+      <textarea value=${prompt} rows=${promptRows} placeholder=${promptPlaceholder} onInput=${(e) => onPrompt(e.target.value)}></textarea>
+    </label>`;
+}
 
 function LogViewer({ env, onClose }) {
   const [text, setText] = useState('');
@@ -454,6 +552,8 @@ function LogViewer({ env, onClose }) {
 function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset }) {
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [agent, setAgent] = useState('claude');
+  const [model, setModel] = useState('');
   const [presetIds, setPresetIds] = useState([]); // selected preset ids, in check order
   const [setupScript, setSetupScript] = useState('');
   const [devScript, setDevScript] = useState('');
@@ -486,7 +586,7 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
     let provision;
     try { provision = buildCustom(); } catch (e) { setErr(e.message); return; }
     setBusy(true);
-    try { await onCreate(name.trim() || undefined, provision || undefined, prompt.trim() || undefined, presetIds); }
+    try { await onCreate(name.trim() || undefined, provision || undefined, prompt.trim() || undefined, presetIds, agent, model.trim() || undefined); }
     catch (e) { setErr(e.message); setBusy(false); }
   };
   const savePreset = async () => {
@@ -513,9 +613,11 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
         <label>Name (optional)
           <input value=${name} placeholder="my-devbox (a-z, 0-9, -)" onInput=${(e) => setName(e.target.value)} />
         </label>
-        <label>First prompt <span class="muted small">— optional; once the env is ready, a Claude session starts with this</span>
-          <textarea rows="3" value=${prompt} placeholder="e.g. Add a custom field to the Oxygen builder and verify it renders." onInput=${(e) => setPrompt(e.target.value)}></textarea>
-        </label>
+        <${AgentPicker} agent=${agent} model=${model} prompt=${prompt}
+          onAgent=${setAgent} onModel=${setModel} onPrompt=${setPrompt}
+          promptLabel="First prompt" promptRows=${3}
+          promptHint="— optional; once the env is ready, a session with this agent/model starts with this"
+          promptPlaceholder="e.g. Add a custom field to the Oxygen builder and verify it renders." />
         <label>Presets <span class="muted small">— compose any number; applied in the order you check them</span></label>
         <div class="preset-list">
           ${presets.length === 0 && html`<div class="muted small pad">No saved presets yet.</div>`}
@@ -784,12 +886,12 @@ function App() {
   const selected = sessions.find((s) => s.id === selectedId);
   const logEnv = envs.find((e) => e.id === logEnvId);
 
-  const createSession = async (envId, prompt, agent) => {
-    const s = await api(`/environments/${envId}/sessions`, { method: 'POST', body: JSON.stringify({ prompt, agent }) });
+  const createSession = async (envId, prompt, agent, model) => {
+    const s = await api(`/environments/${envId}/sessions`, { method: 'POST', body: JSON.stringify({ prompt, agent, model }) });
     setNewSession(null); await refresh(); setSelectedId(s.id);
   };
-  const createEnv = async (name, provision, prompt, presetIds) => {
-    await api('/environments', { method: 'POST', body: JSON.stringify({ name, provision, prompt, presetIds }) });
+  const createEnv = async (name, provision, prompt, presetIds, agent, model) => {
+    await api('/environments', { method: 'POST', body: JSON.stringify({ name, provision, prompt, presetIds, agent, model }) });
     setShowNewEnv(false); refresh();
   };
   const savePreset = async (preset) => {
