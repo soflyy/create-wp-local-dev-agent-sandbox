@@ -151,6 +151,13 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .modal .save-preset .btn { white-space: nowrap; }
 .modal.settings { max-height: 90vh; overflow-y: auto; }
 
+/* SSH command copy lines */
+.copyline { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.copyline code { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text);
+  overflow-x: auto; white-space: pre; }
+.copyline .btn { flex: none; }
+
 /* warm pool (Settings) */
 .warmpool { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
 .warmpool h4 { margin: 0 0 4px; font-size: 13px; }
