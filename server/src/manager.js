@@ -11,6 +11,7 @@ import { allocate } from './allocator.js';
 import * as docker from './docker.js';
 import * as gitauth from './gitauth.js';
 import { computeStatus, coreUp, publicView } from './status.js';
+import { composeProvision } from './provision.js';
 import { log, redact } from './log.js';
 
 // Counting semaphore to bound concurrent (heavy) docker builds.
@@ -72,7 +73,7 @@ export class Manager {
     // (carried in-memory through the pipeline; see onEnvReady).
     const initial = prompt ? { prompt, model, agent } : null;
     // Fire-and-forget pipeline; status is observable via GET.
-    this._pipeline(record, provisionPlan, initial).catch((err) => log.error(`[${record.name}] pipeline crashed:`, err));
+    this._pipeline(record, { provisionPlan, initial }).catch((err) => log.error(`[${record.name}] pipeline crashed:`, err));
     return record;
   }
 
@@ -105,7 +106,7 @@ export class Manager {
     return { args, scratchDir };
   }
 
-  async _pipeline(record, provisionPlan = null, initial = null) {
+  async _pipeline(record, { provisionPlan = null, initial = null, pool = false } = {}) {
     const { config, registry } = this;
     try {
       await mkdir(config.envsDir, { recursive: true });
@@ -148,9 +149,15 @@ export class Manager {
 
       // 3. Up and provisioned.
       await registry.update(record.id, { status: 'running', lastError: null });
-      // Env is up — fire the optional initial session. Best-effort: its failure
-      // must not fail the environment (the env itself is fine).
-      if (initial?.prompt) {
+      if (pool) {
+        // Warm-pool build: it's built and healthy — stop it so it waits cheaply,
+        // and mark it claimable. (start is the fast cached `up -d --build`.)
+        await this.stop(record);
+        await registry.update(record.id, { poolReady: true });
+        log.info(`[pool] ${record.name} ready (preset ${record.pool})`);
+      } else if (initial?.prompt) {
+        // Env is up — fire the optional initial session. Best-effort: its failure
+        // must not fail the environment (the env itself is fine).
         try { await this.onEnvReady?.(record, initial); }
         catch (err) { log.warn(`[${record.name}] initial session failed:`, err.message); }
       }
@@ -177,7 +184,9 @@ export class Manager {
   }
 
   async list() {
-    return Promise.all(this.registry.list().map((r) => this.describe(r)));
+    // Warm-pool members are infrastructure, not user envs — hide them from the
+    // list (they surface via the pool status API instead).
+    return Promise.all(this.registry.list().filter((r) => !r.pool).map((r) => this.describe(r)));
   }
 
   // Is the env's core stack up (so we can exec claude/agents in it)? Cheap.
@@ -271,6 +280,172 @@ export class Manager {
     tick(); // run once at boot
     this.reconcileTimer = setInterval(tick, this.config.reconcileIntervalMs);
     this.reconcileTimer.unref?.();
+  }
+
+  // ---- warm pool ----------------------------------------------------------
+  //
+  // Keep N pre-built-then-stopped envs per preset waiting, so creating from a
+  // warmed preset is a fast cached `start` (claimAndStart) instead of a ~10-min
+  // build. Desired counts live in settings.warmPool ({ [presetId]: n }); warm
+  // members are tagged `pool: presetId` (+ `poolReady` once built). The preset
+  // store is wired in as `this.presets` at boot (index.js).
+
+  poolEntries() {
+    return Object.entries(this.settings.get().warmPool || {});
+  }
+
+  // Live per-preset status for the settings UI.
+  poolStatus() {
+    const byPreset = new Map();
+    const ensure = (pid) => {
+      if (!byPreset.has(pid)) byPreset.set(pid, { presetId: pid, desired: 0, ready: 0, building: 0, failed: 0 });
+      return byPreset.get(pid);
+    };
+    for (const [pid, n] of this.poolEntries()) ensure(pid).desired = Math.max(0, parseInt(n, 10) || 0);
+    for (const e of this.registry.list()) {
+      if (!e.pool) continue;
+      const row = ensure(e.pool);
+      if (e.status === 'failed') row.failed += 1;
+      else if (e.poolReady) row.ready += 1;
+      else row.building += 1;
+    }
+    return [...byPreset.values()].map((r) => ({ ...r, name: this.presets?.get(r.presetId)?.name || null }));
+  }
+
+  // Atomically claim a ready warm env for a preset, converting it to a normal
+  // env (drops the pool tag; the typed name becomes its display label).
+  async claimPoolEnv(presetId, { name } = {}) {
+    return this.registry.mutate((data) => {
+      const cand = Object.values(data.environments).find(
+        (e) => e.pool === presetId && e.poolReady === true && !this.jobs.has(e.id),
+      );
+      if (!cand) return null;
+      cand.pool = null;
+      cand.poolReady = false;
+      if (name && name.trim()) cand.displayName = name.trim().slice(0, 80);
+      return cand;
+    });
+  }
+
+  // Create-from-warmed-preset fast path: claim + cached start + optional initial
+  // session, refilling the pool. Returns the claimed record, or null if none
+  // was ready (caller falls back to a normal build).
+  async claimAndStart(presetId, { name, prompt, model, agent } = {}) {
+    const record = await this.claimPoolEnv(presetId, { name });
+    if (!record) return null;
+    this.jobs.set(record.id, 'configuring');
+    this._claimPipeline(record, { prompt, model, agent }).catch((err) => log.error(`[${record.name}] claim crashed:`, err));
+    this.maintainPoolSoon(); // top the pool back up
+    return record;
+  }
+
+  async _claimPipeline(record, initial = {}) {
+    const { registry, config } = this;
+    try {
+      await docker.npmRun(record, 'start', { timeout: 600_000 }); // up -d --build (cached)
+      await gitauth.configure(record, config, this.settings.get().githubToken);
+      await registry.update(record.id, { status: 'running', lastError: null });
+      if (initial.prompt) {
+        try { await this.onEnvReady?.(registry.get(record.id), initial); }
+        catch (err) { log.warn(`[${record.name}] initial session failed:`, err.message); }
+      }
+    } catch (err) {
+      log.error(`[${record.name}] claim-start failed:`, err.message);
+      await registry.update(record.id, { status: 'failed', lastError: truncate(redactErr(err)) });
+    } finally {
+      this.jobs.delete(record.id);
+    }
+  }
+
+  // Build one warm env for a preset (allocate with reserve-aware cap → pipeline →
+  // stop → poolReady). May throw AllocationError when capacity/reserve is hit.
+  async _buildPoolEnv(presetId) {
+    const preset = this.presets?.get(presetId);
+    if (!preset) return;
+    const provision = composeProvision([preset], null);
+    const record = await allocate(this.registry, this.config, { pool: presetId });
+    this.jobs.set(record.id, 'scaffolding');
+    await this.registry.update(record.id, { preset: preset.name });
+    const provisionPlan = provision ? await this._materializeProvision(record, provision) : null;
+    this._pipeline(record, { provisionPlan, pool: true }).catch((err) => log.error(`[pool ${preset.name}] pipeline crashed:`, err));
+  }
+
+  // Top up / clean up the pool to match desired counts. Idempotent and mutually
+  // exclusive (timer + on-demand callers can't double-build).
+  async maintainPool() {
+    if (!this.presets || this._poolBusy) return;
+    this._poolBusy = true;
+    try {
+      for (const [presetId, desiredRaw] of this.poolEntries()) {
+        const desired = Math.max(0, parseInt(desiredRaw, 10) || 0);
+        const preset = this.presets.get(presetId);
+        let mine = this.registry.list().filter((e) => e.pool === presetId);
+
+        // Stale config (preset deleted): tear down its warm envs.
+        if (!preset) {
+          for (const e of mine) if (!this.jobs.has(e.id)) await this.destroy(e).catch(() => {});
+          continue;
+        }
+
+        // Discard failed warm envs; finalize crash-orphaned ones (built but never
+        // stopped/marked — e.g. server died between 'running' and stop()).
+        for (const e of mine) {
+          if (this.jobs.has(e.id)) continue;
+          if (e.status === 'failed') {
+            log.warn(`[pool ${preset.name}] discarding failed warm env ${e.name}`);
+            await this.destroy(e).catch(() => {});
+          } else if (!e.poolReady && e.setupFinishedAt) {
+            if (e.status === 'running' || e.status === 'degraded') await this.stop(e).catch(() => {});
+            await this.registry.update(e.id, { poolReady: true });
+          }
+        }
+
+        mine = this.registry.list().filter((e) => e.pool === presetId && e.status !== 'failed');
+        const ready = mine.filter((e) => e.poolReady).length;
+        const building = mine.length - ready;
+        // Cap concurrent warm builds so on-demand creates always keep a build
+        // slot (a single broken preset also can't pile up — at most one build is
+        // in flight, re-checked each tick). Each build is fire-and-forget.
+        const inFlightCap = Math.max(1, this.config.buildConcurrency - 1);
+        let slots = Math.min(inFlightCap - building, desired - mine.length);
+        while (slots > 0) {
+          try {
+            await this._buildPoolEnv(presetId);
+          } catch (err) {
+            log.info(`[pool ${preset.name}] hold: ${err.message}`); // at capacity/reserve — retry next tick
+            break;
+          }
+          slots -= 1;
+        }
+      }
+    } finally {
+      this._poolBusy = false;
+    }
+  }
+
+  // Debounced background top-up (after a claim or a config change).
+  maintainPoolSoon() {
+    if (this._poolSoon) return;
+    this._poolSoon = setTimeout(() => {
+      this._poolSoon = null;
+      this.maintainPool().catch((e) => log.warn('pool maintain error:', e.message));
+    }, 1500);
+    this._poolSoon.unref?.();
+  }
+
+  // Nuke a preset's warm envs (e.g. stale after a git push); the loop refills.
+  async rebuildPool(presetId) {
+    const mine = this.registry.list().filter((e) => e.pool === presetId);
+    await Promise.allSettled(mine.map((e) => this.destroy(e)));
+    this.maintainPoolSoon();
+    return mine.length;
+  }
+
+  startPoolLoop() {
+    const tick = () => this.maintainPool().catch((e) => log.warn('pool loop error:', e.message));
+    tick();
+    this.poolTimer = setInterval(tick, this.config.warmPoolIntervalMs);
+    this.poolTimer.unref?.();
   }
 
   // ---- helpers ------------------------------------------------------------

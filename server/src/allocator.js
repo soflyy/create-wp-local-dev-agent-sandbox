@@ -41,12 +41,17 @@ export class AllocationError extends Error {
 
 // Returns the reservation record (already persisted into the registry with
 // status "scaffolding").
-export async function allocate(registry, config, { nameHint } = {}) {
+export async function allocate(registry, config, { nameHint, pool = null } = {}) {
   return registry.mutate(async (data) => {
     const envs = Object.values(data.environments);
-    if (envs.length >= config.maxEnvironments) {
+    // Warm-pool builds must leave a reserve of free slots for on-demand creates,
+    // so they stop short of the hard cap; user creates may use the full cap.
+    const cap = pool ? Math.max(0, config.maxEnvironments - config.warmPoolReserve) : config.maxEnvironments;
+    if (envs.length >= cap) {
       throw new AllocationError(
-        `at capacity: ${envs.length}/${config.maxEnvironments} environments (raise MAX_ENVIRONMENTS)`,
+        pool
+          ? `warm pool deferred: ${envs.length}/${config.maxEnvironments} env(s), reserving ${config.warmPoolReserve} free slot(s)`
+          : `at capacity: ${envs.length}/${config.maxEnvironments} environments (raise MAX_ENVIRONMENTS)`,
         503,
       );
     }
@@ -106,6 +111,10 @@ export async function allocate(registry, config, { nameHint } = {}) {
       // Setup log lives OUTSIDE the env dir (the scaffolder requires an empty
       // target dir).
       setupLogPath: join(config.dataDir, 'logs', `${name}.log`),
+      // Warm-pool members carry the preset id they were built for; poolReady is
+      // set once built + stopped. Both null/false for normal envs.
+      pool: pool || null,
+      poolReady: false,
     };
     data.environments[id] = record;
     return record;

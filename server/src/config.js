@@ -61,6 +61,10 @@ export function loadConfig(env = process.env) {
     maxEnvironments: parseInt(env.MAX_ENVIRONMENTS || '25', 10),
     buildConcurrency: Math.max(1, parseInt(env.BUILD_CONCURRENCY || '2', 10)),
     reconcileIntervalMs: parseInt(env.RECONCILE_INTERVAL_MS || '45000', 10),
+    // Warm pool: free env slots reserved for on-demand creates (the pool builder
+    // won't fill past maxEnvironments - reserve), and how often it tops up.
+    warmPoolReserve: Math.max(0, parseInt(env.WARM_POOL_RESERVE || '5', 10)),
+    warmPoolIntervalMs: parseInt(env.WARM_POOL_INTERVAL_MS || '20000', 10),
 
     // GitHub + Claude tokens are managed in Settings — these env values only
     // seed the settings file on first run.
