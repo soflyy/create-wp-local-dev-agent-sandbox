@@ -49,6 +49,9 @@ export function publicView(record, { status }) {
     // Optional user-set list label; the canonical `name` (dir + compose project)
     // never changes. UI shows displayName when present, else name.
     displayName: record.displayName || null,
+    // Host path of the scaffolded stack — used by the UI to build an SSH command
+    // (cd into it, then `npm run claude` for the interactive TUI).
+    dir: record.dir,
     port: record.port,
     wpUrl: record.wpUrl,
     status,

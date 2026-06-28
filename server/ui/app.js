@@ -107,6 +107,7 @@ function EnvRow({ env, onAction }) {
             ${env.status === 'stopped' && html`<button class="lnk" onClick=${() => onAction('start', env)}>start</button>`}
             ${env.status === 'failed' && html`<button class="lnk" onClick=${() => onAction('start', env)}>retry</button>`}
             <button class="lnk" onClick=${() => onAction('rename', env)}>rename</button>
+            <button class="lnk" onClick=${() => onAction('ssh', env)} title="Copy a command to open a shell / interactive Claude on the box">ssh</button>
             <button class="lnk" onClick=${() => onAction('logs', env)}>logs</button>
             <button class="lnk danger" onClick=${() => onAction('delete', env)}>delete</button>`}
       </div>
@@ -939,6 +940,44 @@ function RenameEnvModal({ env, onClose, onSave }) {
     </div>`;
 }
 
+function CopyLine({ cmd }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(cmd); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { /* clipboard needs https or localhost; the text is selectable regardless */ }
+  };
+  return html`
+    <div class="copyline">
+      <code>${cmd}</code>
+      <button class="btn small ghost" onClick=${copy}>${copied ? 'copied ✓' : 'copy'}</button>
+    </div>`;
+}
+
+// Per-env SSH helper: the UI can't run the interactive Claude TUI (/plugin,
+// /mcp, …) over its headless pipe, so hand the user a paste-ready command to
+// reach it on the box. Host = the address they loaded the UI from; dir is the
+// env's host path. Both editable by the user (it's just text).
+function SshModal({ env, onClose }) {
+  const host = location.hostname || 'YOUR_BOX';
+  const label = env.displayName || env.name;
+  const shellCmd = `ssh root@${host} -t 'cd ${env.dir} && exec bash -l'`;
+  const claudeCmd = `ssh root@${host} -t 'cd ${env.dir} && npm run claude'`;
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(host);
+  return html`
+    <div class="modal-bg" onClick=${onClose}>
+      <div class="modal" onClick=${(e) => e.stopPropagation()}>
+        <h3>SSH into ${label}</h3>
+        <p class="muted small">Open a shell on the box, in this environment's directory. From there <code>npm run claude</code> gives you the full interactive Claude — <code>/plugin</code>, <code>/mcp</code>, <code>/agents</code>, etc. Anything you set up there persists in the workspace and your UI sessions use it too.</p>
+        <label class="muted small">Shell in this environment</label>
+        <${CopyLine} cmd=${shellCmd} />
+        <label class="muted small">…or jump straight into interactive Claude</label>
+        <${CopyLine} cmd=${claudeCmd} />
+        ${loopback && html`<p class="muted small">You loaded this UI over <code>${host}</code> — if you SSH from another machine, swap that for the box's hostname/IP.</p>`}
+        <div class="modal-foot"><button class="btn" onClick=${onClose}>Close</button></div>
+      </div>
+    </div>`;
+}
+
 function App() {
   const [sessions, setSessions] = useState([]);
   const [envs, setEnvs] = useState([]);
@@ -948,6 +987,7 @@ function App() {
   const [showNewEnv, setShowNewEnv] = useState(false);
   const [logEnvId, setLogEnvId] = useState(null);
   const [renameEnv, setRenameEnv] = useState(null);
+  const [sshEnv, setSshEnv] = useState(null);
   const [needToken, setNeedToken] = useState(false);
   const [authed, setAuthed] = useState(!!token.get());
   const [showSettings, setShowSettings] = useState(false);
@@ -1029,6 +1069,7 @@ function App() {
     try {
       if (action === 'logs') return setLogEnvId(env.id);
       if (action === 'rename') return setRenameEnv(env);
+      if (action === 'ssh') return setSshEnv(env);
       if (action === 'session') return setNewSession({ preselect: env.id });
       if (action === 'start') await api(`/environments/${env.id}/start`, { method: 'POST' });
       if (action === 'stop') await api(`/environments/${env.id}/stop`, { method: 'POST' });
@@ -1056,6 +1097,7 @@ function App() {
       ${showNewEnv && html`<${NewEnvModal} presets=${presets} onClose=${() => setShowNewEnv(false)} onCreate=${createEnv} onSavePreset=${savePreset} onDeletePreset=${deletePreset} />`}
       ${logEnvId && logEnv && html`<${LogViewer} env=${logEnv} onClose=${() => setLogEnvId(null)} />`}
       ${renameEnv && html`<${RenameEnvModal} env=${renameEnv} onClose=${() => setRenameEnv(null)} onSave=${renameEnvironment} />`}
+      ${sshEnv && html`<${SshModal} env=${sshEnv} onClose=${() => setSshEnv(null)} />`}
       ${showSettings && html`<${SettingsModal} onClose=${() => setShowSettings(false)}
         onLogout=${() => { token.set(''); setShowSettings(false); setAuthed(false); setNeedToken(true); }} />`}
       ${showHealth && html`<${HealthModal} onClose=${() => setShowHealth(false)} />`}
