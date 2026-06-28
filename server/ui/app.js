@@ -404,11 +404,14 @@ const MODELS = {
   ],
   codex: [
     { id: '', label: 'Default' },
-    { id: 'gpt-5-codex', label: 'gpt-5-codex' },
-    { id: 'gpt-5', label: 'gpt-5' },
-    { id: 'o3', label: 'o3' },
+    { id: 'gpt-5.5', label: 'gpt-5.5' },
+    { id: 'gpt-5.4', label: 'gpt-5.4' },
+    { id: 'gpt-5.4-mini', label: 'gpt-5.4-mini' },
+    { id: 'gpt-5.3-codex-spark', label: 'gpt-5.3-codex-spark (ChatGPT sign-in only)' },
   ],
 };
+// Agents whose model list is fixed — no free-text "Custom…" option.
+const NO_CUSTOM_MODEL = new Set(['codex']);
 const MODEL_CUSTOM = '__custom__';
 
 // Shared agent + model + first-message chooser, used by both the New Session and
@@ -421,6 +424,7 @@ function AgentPicker({ agent, model, prompt, onAgent, onModel, onPrompt, opencod
   const list = agent === 'opencode'
     ? [{ id: '', label: 'Default (Claude Sonnet 4.6)' }, ...opencodeModels.map((id) => ({ id, label: id.replace(/^opencode\//, '') }))]
     : (MODELS[agent] || MODELS.claude);
+  const allowCustom = !NO_CUSTOM_MODEL.has(agent);
   const pickAgent = (a) => { onAgent(a); onModel(''); setCustom(false); }; // reset model to default
   const pickModel = (v) => { if (v === MODEL_CUSTOM) { setCustom(true); onModel(''); } else { setCustom(false); onModel(v); } };
   return html`
@@ -433,7 +437,7 @@ function AgentPicker({ agent, model, prompt, onAgent, onModel, onPrompt, opencod
       <label>Model
         <select value=${custom ? MODEL_CUSTOM : model} onChange=${(e) => pickModel(e.target.value)}>
           ${list.map((m) => html`<option value=${m.id} key=${m.id || 'default'}>${m.label}</option>`)}
-          <option value=${MODEL_CUSTOM}>Custom…</option>
+          ${allowCustom && html`<option value=${MODEL_CUSTOM}>Custom…</option>`}
         </select>
       </label>
     </div>
