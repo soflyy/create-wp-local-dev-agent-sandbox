@@ -324,7 +324,7 @@ function SessionView({ session, now, onChanged, onBack, onDelete }) {
             : html`last active ${fmtAgo(session.lastActivityAt, true)}`}
         </div>
       </header>
-      ${session.sshResumeHint && html`<div class="ssh muted" onClick=${() => navigator.clipboard?.writeText(session.sshResumeHint)} title="click to copy">SSH resume: <code>${session.sshResumeHint}</code></div>`}
+      ${session.sshResumeHint && html`<div class="ssh muted" onClick=${() => copyText(session.sshResumeHint)} title="click to copy">SSH resume: <code>${session.sshResumeHint}</code></div>`}
       <div class="transcript" ref=${scroller} onScroll=${onTranscriptScroll}>
         ${items.map((it, i) => html`<${Bubble} it=${it} key=${i} />`)}
         ${partial && html`<div class="bubble assistant live"><pre>${partial}</pre><span class="cursor">▍</span></div>`}
@@ -940,11 +940,31 @@ function RenameEnvModal({ env, onClose, onSave }) {
     </div>`;
 }
 
+// Copy text to the clipboard. navigator.clipboard only exists on https/localhost,
+// so fall back to a hidden-textarea + execCommand('copy') for plain-http origins
+// (the common case here: hitting the box by IP). Returns true on success.
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+  } catch { /* fall through to the execCommand path */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch { return false; }
+}
+
 function CopyLine({ cmd }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
-    try { await navigator.clipboard.writeText(cmd); setCopied(true); setTimeout(() => setCopied(false), 1500); }
-    catch { /* clipboard needs https or localhost; the text is selectable regardless */ }
+    if (await copyText(cmd)) { setCopied(true); setTimeout(() => setCopied(false), 1500); }
   };
   return html`
     <div class="copyline">
