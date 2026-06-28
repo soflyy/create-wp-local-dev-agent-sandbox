@@ -15,6 +15,7 @@ import { Manager } from './manager.js';
 import { SessionStore } from './sessions.js';
 import { SessionBus } from './sessionbus.js';
 import { ClaudeEngine, reapAgents } from './claude.js';
+import { refreshZenModels } from './zenmodels.js';
 import { buildRoutes } from './routes.js';
 import { createServer } from './http.js';
 
@@ -61,6 +62,10 @@ async function main() {
   // running in a container is an orphan from a previous run — reap them, otherwise
   // a resume would spawn a second agent that races the orphan. Best-effort.
   await Promise.allSettled(registry.list().map((e) => reapAgents(e)));
+
+  // Warm the OpenCode Zen model list for the model dropdown (fire-and-forget;
+  // GET /models also fetches on demand if this hasn't landed yet).
+  refreshZenModels().catch(() => {});
 
   // When an env finishes provisioning, optionally kick off its initial session
   // (the prompt passed to POST /environments). Decoupled via this hook so the
