@@ -413,6 +413,7 @@ const AGENTS_ORDER = ['claude', 'codex', 'opencode'];
 const MODELS = {
   claude: [
     { id: '', label: 'Default' },
+    { id: 'fable', label: 'Fable 5' },
     { id: 'opus', label: 'Opus 4.8' },
     { id: 'sonnet', label: 'Sonnet 4.6' },
     { id: 'haiku', label: 'Haiku 4.5' },
