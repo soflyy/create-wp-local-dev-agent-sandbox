@@ -60,7 +60,11 @@ export function loadConfig(env = process.env) {
     portRange: parseRange(env.WP_PORT_RANGE, '9000-9999'),
     maxEnvironments: parseInt(env.MAX_ENVIRONMENTS || '25', 10),
     buildConcurrency: Math.max(1, parseInt(env.BUILD_CONCURRENCY || '2', 10)),
+    // Status prober: rest between full sweeps, and the delay between probing one
+    // env and the next WITHIN a sweep. The sweep is serial (one env at a time),
+    // so spacing directly bounds how hard it hits docker — never a burst.
     reconcileIntervalMs: parseInt(env.RECONCILE_INTERVAL_MS || '45000', 10),
+    probeSpacingMs: Math.max(0, parseInt(env.PROBE_SPACING_MS || '500', 10)),
     // Warm pool: free env slots reserved for on-demand creates (the pool builder
     // won't fill past maxEnvironments - reserve), and how often it tops up.
     warmPoolReserve: Math.max(0, parseInt(env.WARM_POOL_RESERVE || '5', 10)),

@@ -10,9 +10,11 @@ import { join, dirname } from 'node:path';
 import { allocate } from './allocator.js';
 import * as docker from './docker.js';
 import * as gitauth from './gitauth.js';
-import { computeStatus, coreUp, publicView } from './status.js';
+import { computeStatus, coreUp, publicView, TRANSIENT } from './status.js';
 import { composeProvision } from './provision.js';
 import { log, redact } from './log.js';
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Counting semaphore to bound concurrent (heavy) docker builds.
 class Semaphore {
@@ -41,6 +43,11 @@ export class Manager {
     this.settings = settings;
     this.jobs = new Map(); // id -> transient state string
     this.buildSem = new Semaphore(config.buildConcurrency);
+    // Last `docker compose ps` result per env id ({ ps, at }). The background
+    // prober (reconcile sweep) is the ONLY thing that polls docker on a timer;
+    // the read path (describe/list) serves from this cache so status requests
+    // never fan out docker work — no matter how many clients poll how fast.
+    this.probeCache = new Map(); // id -> { ps, at }
   }
 
   // Write the WP-admin defaults from Settings into a server-scoped
@@ -171,15 +178,31 @@ export class Manager {
 
   // ---- status / describe --------------------------------------------------
 
-  async _gather(record) {
+  // Live single-env probe: hits docker, refreshes the cache, returns the ps.
+  // Used by the background sweep and by user-initiated actions (start/stop,
+  // pre-exec gate) — NOT by the polled read path.
+  async _probe(record) {
     const ps = await docker.ps(record);
+    this.probeCache.set(record.id, { ps, at: Date.now() });
+    return ps;
+  }
+
+  // Read-path status: served from the probe cache, never touches docker. On a
+  // cache miss (env not yet swept, e.g. right after boot or a lifecycle action)
+  // fall back to the persisted record status so the answer is still sane.
+  _gather(record) {
     const jobState = this.jobs.get(record.id) || null;
-    const status = computeStatus({ record, jobState, ps });
-    return { ps, status };
+    const cached = this.probeCache.get(record.id);
+    if (!cached) {
+      const status = jobState && TRANSIENT.has(jobState) ? jobState : record.status;
+      return { ps: null, status };
+    }
+    const status = computeStatus({ record, jobState, ps: cached.ps });
+    return { ps: cached.ps, status };
   }
 
   async describe(record) {
-    const { status } = await this._gather(record);
+    const { status } = this._gather(record);
     return publicView(record, { status });
   }
 
@@ -189,9 +212,11 @@ export class Manager {
     return Promise.all(this.registry.list().filter((r) => !r.pool).map((r) => this.describe(r)));
   }
 
-  // Is the env's core stack up (so we can exec claude/agents in it)? Cheap.
+  // Is the env's core stack up (so we can exec claude/agents in it)? A live,
+  // on-demand single-env probe — this gates a real action, so it must be fresh,
+  // not cached. Refreshes the cache as a side effect.
   async usable(record) {
-    return coreUp(await docker.ps(record));
+    return coreUp(await this._probe(record));
   }
 
   // ---- lifecycle ----------------------------------------------------------
@@ -201,6 +226,9 @@ export class Manager {
   async stop(record) {
     await docker.npmRun(record, 'stop', { timeout: 120_000 });
     await this.registry.update(record.id, { status: 'stopped' });
+    // Drop the (now stale) cached ps so describe reflects the new status
+    // immediately rather than showing "running" until the next sweep.
+    this.probeCache.delete(record.id);
     return this.describe(record);
   }
 
@@ -213,6 +241,7 @@ export class Manager {
     } finally {
       this.jobs.delete(record.id);
     }
+    this.probeCache.delete(record.id); // stale cache → fall back to fresh status
     return this.describe(record);
   }
 
@@ -230,6 +259,7 @@ export class Manager {
       });
     } finally {
       this.jobs.delete(record.id);
+      this.probeCache.delete(record.id); // env gone → drop its cache entry
     }
   }
 
@@ -249,37 +279,70 @@ export class Manager {
 
   // ---- reconcile loop (supervisor) ----------------------------------------
 
+  // One paced sweep: probe every env ONE AT A TIME, waiting for each to finish
+  // before starting the next, with a fixed delay in between. This is the single
+  // background poller — it deliberately trickles docker work so a large fleet
+  // can never pin the host the way a per-request fan-out did. Each probe also
+  // refreshes the read cache that describe()/list() serve from.
   async reconcile() {
-    for (const record of this.registry.list()) {
-      if (this.jobs.has(record.id)) continue; // pipeline owns it
+    const records = this.registry.list();
+    for (let i = 0; i < records.length; i += 1) {
+      const record = records[i];
+      if (this.jobs.has(record.id)) continue; // pipeline owns it (don't probe/clobber)
       try {
-        const ps = await docker.ps(record);
-        if (!coreUp(ps)) {
-          // Containers down: a running/degraded env is now stopped; one left
-          // mid-pipeline by a crash/restart is failed; stopped stays stopped.
-          const s = record.status;
-          if (s === 'running' || s === 'degraded') {
-            await this.registry.update(record.id, { status: 'stopped' });
-          } else if (['setting-up', 'configuring', 'scaffolding'].includes(s)) {
-            await this.registry.update(record.id, { status: 'failed', lastError: record.lastError || 'interrupted (server restart or crash)' });
-          }
-          continue;
-        }
-        // Containers up → running.
-        if (record.status !== 'running' && record.status !== 'stopped') {
-          await this.registry.update(record.id, { status: 'running' });
-        }
+        const ps = await this._probe(record);
+        await this._reconcileStatus(record, ps);
       } catch (err) {
         log.warn(`[${record.name}] reconcile error:`, err.message);
       }
+      // Breathe between envs so the sweep is a trickle, not a burst. (No delay
+      // after the last one.)
+      if (i < records.length - 1) await sleep(this.config.probeSpacingMs);
     }
   }
 
+  // Fold a fresh ps into the persisted status (side of reconcile that writes).
+  async _reconcileStatus(record, ps) {
+    if (!coreUp(ps)) {
+      // Containers down: a running/degraded env is now stopped; one left
+      // mid-pipeline by a crash/restart is failed; stopped stays stopped.
+      const s = record.status;
+      if (s === 'running' || s === 'degraded') {
+        await this.registry.update(record.id, { status: 'stopped' });
+      } else if (['setting-up', 'configuring', 'scaffolding'].includes(s)) {
+        await this.registry.update(record.id, { status: 'failed', lastError: record.lastError || 'interrupted (server restart or crash)' });
+      }
+      return;
+    }
+    // Containers up → running.
+    if (record.status !== 'running' && record.status !== 'stopped') {
+      await this.registry.update(record.id, { status: 'running' });
+    }
+  }
+
+  // Self-rescheduling loop: the next sweep is armed only AFTER the current one
+  // finishes (plus a rest gap), so sweeps can never overlap or stack up even if
+  // one runs long. A plain setInterval could pile sweeps on top of each other
+  // under load — exactly the failure mode this replaces.
   startReconcileLoop() {
-    const tick = () => this.reconcile().catch((e) => log.warn('reconcile loop error:', e.message));
-    tick(); // run once at boot
-    this.reconcileTimer = setInterval(tick, this.config.reconcileIntervalMs);
-    this.reconcileTimer.unref?.();
+    this._reconcileStopped = false;
+    const loop = async () => {
+      if (this._reconcileStopped) return;
+      try {
+        await this.reconcile();
+      } catch (e) {
+        log.warn('reconcile loop error:', e.message);
+      }
+      if (this._reconcileStopped) return;
+      this.reconcileTimer = setTimeout(loop, this.config.reconcileIntervalMs);
+      this.reconcileTimer.unref?.();
+    };
+    loop(); // run one sweep at boot, then rest → sweep → rest → …
+  }
+
+  stopReconcileLoop() {
+    this._reconcileStopped = true;
+    clearTimeout(this.reconcileTimer);
   }
 
   // ---- warm pool ----------------------------------------------------------

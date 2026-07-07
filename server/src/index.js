@@ -93,6 +93,7 @@ async function main() {
     if (shuttingDown) return;
     shuttingDown = true;
     log.info('shutting down — reaping active agent turns (containers stay up)');
+    manager.stopReconcileLoop?.(); // stop the status prober before teardown
     try {
       claudeEngine.interruptAll();
       await Promise.race([
