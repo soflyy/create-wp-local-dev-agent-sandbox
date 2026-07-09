@@ -120,24 +120,29 @@ function WorkingTag({ since, now }) {
   return html`<span class="sess-time working" title="Claude is working right now">working ${fmtDur(ms)}</span>`;
 }
 
-function SessionItem({ s, selectedId, onSelect, onDelete, now }) {
+function SessionItem({ s, selectedId, onSelect, onDelete, onArchive, onRestore, now }) {
   const running = s.status === 'running';
   return html`
-    <div class=${`sess ${s.id === selectedId ? 'active' : ''}`} onClick=${() => onSelect(s.id)}>
+    <div class=${`sess ${s.id === selectedId ? 'active' : ''} ${s.archived ? 'archived' : ''}`} onClick=${() => onSelect(s.id)}>
       <div class="sess-top">
         <${StatusDot} status=${s.status} />
         <span class="sess-title">${s.title || s.id}</span>
         ${running
           ? html`<${WorkingTag} since=${s.lastActivityAt} now=${now} />`
           : html`<span class="sess-time" title=${`last active ${fullTime(s.lastActivityAt)}`}>${fmtAgo(s.lastActivityAt)}</span>`}
+        ${s.archived
+          ? html`<button class="sess-arch lnk" title="Restore session" onClick=${(e) => { e.stopPropagation(); onRestore(s); }}>↩</button>`
+          : html`<button class="sess-arch lnk" title="Archive session (hide, keep transcript)" onClick=${(e) => { e.stopPropagation(); onArchive(s); }}>🗄</button>`}
         <button class="sess-del lnk" title="Delete session" onClick=${(e) => { e.stopPropagation(); onDelete(s); }}>🗑</button>
       </div>
       <div class="sess-sub muted"><span class="agent-tag">${agentLabel(s.agent)}</span> · started ${fmtAgo(s.createdAt, true)} · ${s.turnCount} turn${s.turnCount === 1 ? '' : 's'} · $${(s.costUsd || 0).toFixed(3)}</div>
     </div>`;
 }
 
-function Sidebar({ sessions, envs, selectedId, now, onSelect, onNewEnv, onEnvAction, onSettings, onHealth, onDeleteSession }) {
+function Sidebar({ sessions, envs, selectedId, now, onSelect, onNewEnv, onEnvAction, onSettings, onHealth, onDeleteSession, onArchiveSession, onRestoreSession }) {
   const [expanded, setExpanded] = useState(() => new Set());
+  // Which envs currently have their "Archived (N)" reveal expanded.
+  const [archOpen, setArchOpen] = useState(() => new Set());
   // Declutter long lists: stopped envs (data intact, just parked) are hidden by
   // default. "Active" = anything not stopped (running/degraded/building/failed).
   const [filter, setFilter] = useState('active');
@@ -146,6 +151,11 @@ function Sidebar({ sessions, envs, selectedId, now, onSelect, onNewEnv, onEnvAct
   const shown = envs.filter((e) =>
     filter === 'all' ? true : filter === 'stopped' ? e.status === 'stopped' : e.status !== 'stopped');
   const toggle = (id) => setExpanded((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const toggleArch = (id) => setArchOpen((prev) => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
     return next;
@@ -177,18 +187,32 @@ function Sidebar({ sessions, envs, selectedId, now, onSelect, onNewEnv, onEnvAct
             const envSessions = sessions
               .filter((s) => s.envId === e.id)
               .sort((a, b) => String(b.lastActivityAt || '').localeCompare(String(a.lastActivityAt || '')));
+            // Archived sessions are kept but hidden behind a reveal, so a busy env
+            // (20 sessions) can show just the two you're working on.
+            const active = envSessions.filter((s) => !s.archived);
+            const archived = envSessions.filter((s) => s.archived);
             const open = expanded.has(e.id) || e.id === selEnvId;
+            const showArch = archOpen.has(e.id);
+            const itemProps = { selectedId, now, onSelect, onDelete: onDeleteSession, onArchive: onArchiveSession, onRestore: onRestoreSession };
             return html`
               <div class="env-group" key=${e.id}>
                 <${EnvRow} env=${e} onAction=${onEnvAction} />
                 <button class="sess-toggle" onClick=${() => toggle(e.id)}>
                   <span class="chev">${open ? '▾' : '▸'}</span>
-                  ${envSessions.length} session${envSessions.length === 1 ? '' : 's'}
+                  ${active.length} session${active.length === 1 ? '' : 's'}
+                  ${archived.length > 0 && html`<span class="muted small"> · ${archived.length} archived</span>`}
                 </button>
                 ${open && html`
                   <div class="env-sessions">
-                    ${envSessions.length === 0 && html`<div class="muted pad small no-sess">No sessions yet.</div>`}
-                    ${envSessions.map((s) => html`<${SessionItem} s=${s} key=${s.id} selectedId=${selectedId} now=${now} onSelect=${onSelect} onDelete=${onDeleteSession} />`)}
+                    ${active.length === 0 && archived.length === 0 && html`<div class="muted pad small no-sess">No sessions yet.</div>`}
+                    ${active.length === 0 && archived.length > 0 && html`<div class="muted pad small no-sess">No active sessions.</div>`}
+                    ${active.map((s) => html`<${SessionItem} ...${itemProps} s=${s} key=${s.id} />`)}
+                    ${archived.length > 0 && html`
+                      <button class="arch-toggle" onClick=${() => toggleArch(e.id)}>
+                        <span class="chev">${showArch ? '▾' : '▸'}</span>
+                        Archived (${archived.length})
+                      </button>`}
+                    ${showArch && archived.map((s) => html`<${SessionItem} ...${itemProps} s=${s} key=${s.id} />`)}
                   </div>`}
               </div>`;
           })}
@@ -214,7 +238,7 @@ function Bubble({ it }) {
   return html`<div class="raw"><pre>${it.text}</pre></div>`;
 }
 
-function SessionView({ session, now, onChanged, onBack, onDelete }) {
+function SessionView({ session, now, onChanged, onBack, onDelete, onArchive, onRestore }) {
   const [items, setItems] = useState([]);
   const [partial, setPartial] = useState('');
   const [busy, setBusy] = useState(false);
@@ -311,6 +335,9 @@ function SessionView({ session, now, onChanged, onBack, onDelete }) {
                 onBlur=${saveTitle} />`
             : html`<strong title="Double-click to rename" onDblClick=${startEdit}>${session.title || id}</strong>
                 <button class="lnk small" onClick=${startEdit} title="Rename">✎</button>
+                ${session.archived
+                  ? html`<button class="lnk small" onClick=${onRestore} title="Restore session">↩</button>`
+                  : html`<button class="lnk small" onClick=${onArchive} title="Archive session (hide, keep transcript)">🗄</button>`}
                 <button class="lnk small danger" onClick=${onDelete} title="Delete session">🗑</button>`}
         </div>
         <div class="bar-meta muted">
@@ -1068,6 +1095,16 @@ function App() {
       await refresh();
     } catch (e) { alert(`Delete failed: ${e.message}`); }
   };
+  // Archive/restore are reversible — no confirm. Archiving interrupts any live
+  // turn server-side; the transcript and resume id are kept either way.
+  const archiveSession = async (s) => {
+    try { await api(`/sessions/${s.id}/archive`, { method: 'POST' }); await refresh(); }
+    catch (e) { alert(`Archive failed: ${e.message}`); }
+  };
+  const restoreSession = async (s) => {
+    try { await api(`/sessions/${s.id}/restore`, { method: 'POST' }); await refresh(); }
+    catch (e) { alert(`Restore failed: ${e.message}`); }
+  };
   const envAction = async (action, env) => {
     if (action === 'admin-login') {
       // Open the tab synchronously (in the click gesture) so popup blockers allow
@@ -1106,9 +1143,10 @@ function App() {
     <div class=${`layout ${selected ? 'has-selection' : ''}`}>
       <${Sidebar} sessions=${sessions} envs=${envs} selectedId=${selectedId} now=${now}
         onSelect=${setSelectedId} onNewEnv=${() => setShowNewEnv(true)}
-        onEnvAction=${envAction} onSettings=${() => setShowSettings(true)} onHealth=${() => setShowHealth(true)} onDeleteSession=${deleteSession} />
+        onEnvAction=${envAction} onSettings=${() => setShowSettings(true)} onHealth=${() => setShowHealth(true)}
+        onDeleteSession=${deleteSession} onArchiveSession=${archiveSession} onRestoreSession=${restoreSession} />
       ${selected
-        ? html`<${SessionView} session=${selected} key=${selected.id} now=${now} onChanged=${refresh} onBack=${() => setSelectedId(null)} onDelete=${() => deleteSession(selected)} />`
+        ? html`<${SessionView} session=${selected} key=${selected.id} now=${now} onChanged=${refresh} onBack=${() => setSelectedId(null)} onDelete=${() => deleteSession(selected)} onArchive=${() => archiveSession(selected)} onRestore=${() => restoreSession(selected)} />`
         : html`<section class="main empty"><div class="muted">
             ${envs.length === 0
               ? html`No environments yet. <button class="btn" onClick=${() => setShowNewEnv(true)}>Create an environment</button> to begin.`

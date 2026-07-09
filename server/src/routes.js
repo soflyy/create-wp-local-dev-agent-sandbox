@@ -55,6 +55,7 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
     lastResult: s.lastResult,
     costUsd: s.costUsd,
     lastError: s.lastError,
+    archived: !!s.archived,
     createdAt: s.createdAt,
     lastActivityAt: s.lastActivityAt,
     sshResumeHint: sshHint(s),
@@ -239,8 +240,13 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
       let list = sessions.store.list();
       const envId = ctx.query.get('envId');
       const status = ctx.query.get('status');
+      // archived filter: "only" (archived), "exclude" (active). Default returns
+      // both (with the `archived` flag) so the UI can group them in one fetch.
+      const archived = ctx.query.get('archived');
       if (envId) list = list.filter((s) => s.envId === envId);
       if (status) list = list.filter((s) => publicSession(s).status === status);
+      if (archived === 'only') list = list.filter((s) => s.archived);
+      else if (archived === 'exclude') list = list.filter((s) => !s.archived);
       ctx.send(200, { sessions: list.map(publicSession) });
     }),
 
@@ -251,6 +257,22 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
       const title = String(ctx.body.title || '').replace(/\s+/g, ' ').trim();
       if (!title) throw httpErr(400, 'title is required');
       const updated = await sessions.store.update(s.id, { title: title.slice(0, 200) });
+      ctx.send(200, publicSession(updated));
+    }),
+
+    // Archive: hide a session from the sidebar without deleting it — the record,
+    // transcript, and claude/codex resume id all persist, so it can be restored
+    // and resumed later. Any in-flight turn is interrupted first (an archived
+    // session shouldn't keep working invisibly). Restore just clears the flag.
+    route('POST', '/sessions/:id/archive', async (ctx) => {
+      const s = sessionOr404(ctx);
+      sessions.engine.interrupt(s.id);
+      const updated = await sessions.store.update(s.id, { archived: true });
+      ctx.send(200, publicSession(updated));
+    }),
+    route('POST', '/sessions/:id/restore', async (ctx) => {
+      const s = sessionOr404(ctx);
+      const updated = await sessions.store.update(s.id, { archived: false });
       ctx.send(200, publicSession(updated));
     }),
 

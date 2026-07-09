@@ -50,9 +50,17 @@ pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5
 .env-sessions { padding-left: 12px; border-left: 2px solid var(--line); margin: 0 0 6px 16px; }
 .env-sessions .no-sess { padding: 4px 8px; }
 .env-sessions .sess { border-bottom: 0; border-radius: 6px; padding: 6px 8px; }
-.sess-del { flex: none; opacity: 0; font-size: 12px; }
-.sess:hover .sess-del, .sess.active .sess-del { opacity: 0.7; }
-.sess-del:hover { opacity: 1; }
+.sess-del, .sess-arch { flex: none; opacity: 0; font-size: 12px; }
+.sess:hover .sess-del, .sess.active .sess-del,
+.sess:hover .sess-arch, .sess.active .sess-arch { opacity: 0.7; }
+.sess-del:hover, .sess-arch:hover { opacity: 1; }
+/* Archived sessions read as parked: dimmed until hovered/selected. */
+.sess.archived { opacity: 0.6; }
+.sess.archived:hover, .sess.archived.active { opacity: 1; }
+.arch-toggle { display: flex; align-items: center; gap: 6px; width: 100%; background: none; border: 0;
+  color: var(--muted); cursor: pointer; font-size: 11px; text-align: left; padding: 4px 8px; }
+.arch-toggle:hover { color: var(--text); }
+.arch-toggle .chev { width: 9px; display: inline-block; }
 .rename { font: inherit; font-weight: 600; background: var(--bg); color: var(--text);
   border: 1px solid var(--accent); border-radius: 6px; padding: 2px 6px; min-width: 200px; }
 .sess { padding: 10px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
