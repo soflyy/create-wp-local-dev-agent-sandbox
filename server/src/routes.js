@@ -151,7 +151,14 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
       ctx.send(200, { loginUrl: url });
     }),
     route('POST', '/environments/:id/stop', async (ctx) => ctx.send(200, await manager.stop(envOr404(ctx)))),
-    route('POST', '/environments/:id/start', async (ctx) => ctx.send(200, await manager.start(envOr404(ctx)))),
+    route('POST', '/environments/:id/start', async (ctx) => {
+      try {
+        ctx.send(200, await manager.start(envOr404(ctx)));
+      } catch (err) {
+        if (err instanceof AllocationError) throw httpErr(err.status, err.message);
+        throw err;
+      }
+    }),
 
     // Rename the list label only — canonical name/dir/compose project are untouched.
     // Blank resets to the canonical name (displayName -> null).

@@ -108,7 +108,7 @@ export async function systemHealth(config, registry) {
     cpu,
     disk,
     docker: { df, containersRunning: running, containersTotal: total },
-    environments: { count: envs.length, max: config.maxEnvironments, running: liveEnvs.length },
+    environments: { count: envs.length, max: config.maxEnvironments, running: liveEnvs.length, maxRunning: config.maxRunning },
     perEnv,
     estimate: { avgEnvMemBytes, ramHeadroomEnvs },
   };

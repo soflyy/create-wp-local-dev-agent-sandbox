@@ -58,7 +58,17 @@ export function loadConfig(env = process.env) {
 
     // Allocation / limits
     portRange: parseRange(env.WP_PORT_RANGE, '9000-9999'),
-    maxEnvironments: parseInt(env.MAX_ENVIRONMENTS || '25', 10),
+    // Two independent caps, because stored and running envs cost different
+    // resources. maxEnvironments bounds TOTAL stored records (running + stopped +
+    // warm pool) — a high safety backstop; the real limit on stored envs is disk
+    // (see minFreeDiskGb), since a stopped env idles at ~0 CPU/RAM. maxRunning
+    // bounds envs whose containers are up (or coming up) — the CPU/RAM guardrail.
+    maxEnvironments: parseInt(env.MAX_ENVIRONMENTS || '200', 10),
+    maxRunning: Math.max(1, parseInt(env.MAX_RUNNING || '10', 10)),
+    // Refuse new allocations (user create or warm build) when free disk on the
+    // data filesystem drops below this — stops a runaway pool from filling the
+    // disk. 0 disables the guard.
+    minFreeDiskGb: Math.max(0, parseFloat(env.MIN_FREE_DISK_GB || '10')),
     buildConcurrency: Math.max(1, parseInt(env.BUILD_CONCURRENCY || '2', 10)),
     // Status prober: rest between full sweeps, and the delay between probing one
     // env and the next WITHIN a sweep. The sweep is serial (one env at a time),

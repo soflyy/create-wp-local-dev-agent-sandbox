@@ -7,7 +7,7 @@ import { createWriteStream, mkdirSync } from 'node:fs';
 import { readFile, writeFile, rm, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 
-import { allocate } from './allocator.js';
+import { allocate, AllocationError } from './allocator.js';
 import * as docker from './docker.js';
 import * as gitauth from './gitauth.js';
 import { computeStatus, coreUp, publicView, TRANSIENT } from './status.js';
@@ -15,6 +15,11 @@ import { composeProvision } from './provision.js';
 import { log, redact } from './log.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Statuses where an env is consuming compute — its containers are up, or a
+// pipeline is bringing them up. These count against maxRunning (the CPU/RAM
+// cap). Stopped/failed/destroying envs cost disk, not compute, so they don't.
+const COMPUTE_STATUSES = new Set(['running', 'degraded', 'scaffolding', 'setting-up', 'configuring']);
 
 // Counting semaphore to bound concurrent (heavy) docker builds.
 class Semaphore {
@@ -50,6 +55,32 @@ export class Manager {
     this.probeCache = new Map(); // id -> { ps, at }
   }
 
+  // ---- running cap --------------------------------------------------------
+  //
+  // Envs whose containers are up (or being brought up) cost CPU/RAM; stopped
+  // ones (incl. the warm pool) cost only disk. maxRunning bounds the former so
+  // a large stored fleet can't peg the host. Enforced at every boot point:
+  // create, restart (start), warm claim, and warm build.
+
+  _runningCount() {
+    return this.registry.list().filter((e) => COMPUTE_STATUSES.has(e.status)).length;
+  }
+
+  // Throw (AllocationError, so routes map it to a 503) if booting one more env
+  // would exceed maxRunning. Warm builds phrase it as a deferral — maintainPool
+  // catches and retries next tick.
+  _assertRunRoom({ pool = false } = {}) {
+    const n = this._runningCount();
+    if (n >= this.config.maxRunning) {
+      throw new AllocationError(
+        pool
+          ? `warm build deferred: ${n}/${this.config.maxRunning} running`
+          : `at running capacity: ${n}/${this.config.maxRunning} running — stop an env or raise MAX_RUNNING`,
+        503,
+      );
+    }
+  }
+
   // Write the WP-admin defaults from Settings into a server-scoped
   // XDG_CONFIG_HOME config.json that the scaffolder reads (seeds each new site's
   // admin account). Kept out of the operator's real ~/.config.
@@ -66,6 +97,7 @@ export class Manager {
   // ---- create -------------------------------------------------------------
 
   async createEnvironment({ name, provision, prompt, model, agent } = {}) {
+    this._assertRunRoom(); // a create boots immediately — count it against maxRunning
     const record = await allocate(this.registry, this.config, { nameHint: name });
     this.jobs.set(record.id, 'scaffolding');
     // Materialize the provisioning inputs to files the scaffolder can read, and
@@ -233,6 +265,7 @@ export class Manager {
   }
 
   async start(record) {
+    this._assertRunRoom(); // restarting a stopped env brings its containers back up
     this.jobs.set(record.id, 'configuring');
     try {
       await docker.npmRun(record, 'start', { timeout: 600_000 }); // up -d --build (cached)
@@ -394,6 +427,7 @@ export class Manager {
   // session, refilling the pool. Returns the claimed record, or null if none
   // was ready (caller falls back to a normal build).
   async claimAndStart(presetId, { name, prompt, model, agent } = {}) {
+    this._assertRunRoom(); // claiming + starting a warm env boots it (before touching the pool)
     const record = await this.claimPoolEnv(presetId, { name });
     if (!record) return null;
     this.jobs.set(record.id, 'configuring');
@@ -425,6 +459,7 @@ export class Manager {
   async _buildPoolEnv(presetId) {
     const preset = this.presets?.get(presetId);
     if (!preset) return;
+    this._assertRunRoom({ pool: true }); // a build boots the stack before stopping it
     const provision = composeProvision([preset], null);
     const record = await allocate(this.registry, this.config, { pool: presetId });
     this.jobs.set(record.id, 'scaffolding');
