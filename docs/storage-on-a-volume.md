@@ -83,6 +83,15 @@ sudo bash scripts/move-data-to-volume.sh --volume /mnt/devbox_data
 sudo bash scripts/move-data-to-volume.sh --volume /mnt/devbox_data --apply
 ```
 
+**How long / how to tell it's working.** Copying is dominated by *file count*, not
+size — an env is ~90k small files (node_modules + WP core). Measured rate on this
+box: ~3 GB / 90k files in ~19 s, so **~75 GB ≈ 10–15 min** of downtime (plan for
+20). The copy step streams a live `rsync --info=progress2` line (% done, speed,
+ETA). The verify step then re-scans every file on both sides and stays quiet for a
+minute or two — the script prints a dot every 10 s there so it never looks hung.
+To watch from a second SSH session: `watch df -h <volume>` (used space climbing)
+or `du -sh <volume>`.
+
 What `--apply` does, in order:
 
 1. Stops the `devbox-server` service and any env containers whose bind mounts

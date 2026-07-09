@@ -130,12 +130,17 @@ if command -v docker >/dev/null; then
   fi
 fi
 
-say ">> [2/5] copying data to the volume (this can take a while for tens of GB)…"
+say ">> [2/5] copying data to the volume (live progress below; ~10-15 min for tens of GB)…"
+# --info=progress2 streams a single updating line: % done, speed, and ETA.
 rsync -aHAX --numeric-ids --info=progress2 "$DATA_DIR"/ "$VOLUME"/
 
-say ">> [3/5] verifying the copy is identical…"
-# A second rsync in itemize+dry-run mode must report ZERO changes.
+say ">> [3/5] verifying the copy is byte-identical (re-scans every file on both"
+say "         sides — this stays quiet for a minute or two; the dots mean it's alive)…"
+# A second rsync in itemize+dry-run mode must report ZERO changes. It produces no
+# output while scanning, so run a heartbeat alongside it so it never looks hung.
+( while true; do sleep 10; printf '.'; done ) & HB=$!
 DIFF="$(rsync -aHAXn --numeric-ids -i "$DATA_DIR"/ "$VOLUME"/ | grep -v '^$' || true)"
+kill "$HB" 2>/dev/null || true; echo
 if [[ -n "$DIFF" ]]; then
   say "$DIFF" | head -20
   die "verification found differences after copy — NOT swapping. Source is untouched at $DATA_DIR."
