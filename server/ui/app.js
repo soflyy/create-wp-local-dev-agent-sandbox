@@ -881,7 +881,7 @@ function HealthModal({ onClose }) {
               ? html`Room for ≈ <b>${est.ramHeadroomEnvs}</b> more environment${est.ramHeadroomEnvs === 1 ? '' : 's'} in RAM — avg <b>${gb(est.avgEnvMemBytes)}</b>/env, ${h.environments.running} running.${m.swapTotalBytes ? '' : ' No swap: when free RAM hits zero the box starts OOM-killing processes, so keep headroom.'}`
               : html`${h.environments.running} environments running.`}
           </div>
-          <div class="muted small">Environments: ${h.environments.running} running · ${h.environments.count} total · cap ${h.environments.max}</div>
+          <div class="muted small">Environments: ${h.environments.running}${h.environments.maxRunning ? `/${h.environments.maxRunning}` : ''} running · ${h.environments.count} stored · stored cap ${h.environments.max}</div>
           ${h.perEnv.length > 0 && html`
             <table class="health-table">
               <thead><tr><th>Environment</th><th>Status</th><th>Containers</th><th>Memory</th></tr></thead>

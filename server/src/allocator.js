@@ -5,6 +5,7 @@
 import net from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
+import { statfs } from 'node:fs/promises';
 import { listProjects } from './docker.js';
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{1,38}$/;
@@ -39,6 +40,17 @@ export class AllocationError extends Error {
   }
 }
 
+// Free gibibytes on the filesystem holding `path`, or null if it can't be read
+// (never block an allocation on a stat failure — treat unknown as "room").
+async function freeDiskGb(path) {
+  try {
+    const s = await statfs(path);
+    return (s.bavail * s.bsize) / 1024 ** 3;
+  } catch {
+    return null;
+  }
+}
+
 // Returns the reservation record (already persisted into the registry with
 // status "scaffolding").
 export async function allocate(registry, config, { nameHint, pool = null } = {}) {
@@ -54,6 +66,19 @@ export async function allocate(registry, config, { nameHint, pool = null } = {})
           : `at capacity: ${envs.length}/${config.maxEnvironments} environments (raise MAX_ENVIRONMENTS)`,
         503,
       );
+    }
+
+    // Disk guard: the real limit on stored envs is disk, not a count. Stat the
+    // data filesystem (envsDir may not exist yet; dataDir shares its filesystem).
+    if (config.minFreeDiskGb > 0) {
+      const freeGb = await freeDiskGb(config.dataDir);
+      if (freeGb !== null && freeGb < config.minFreeDiskGb) {
+        throw new AllocationError(
+          `low disk: ${freeGb.toFixed(1)}GB free < ${config.minFreeDiskGb}GB floor` +
+            (pool ? ' (warm build deferred)' : ' — free space or add disk (raise/lower MIN_FREE_DISK_GB)'),
+          507,
+        );
+      }
     }
 
     const usedNames = new Set(envs.map((e) => e.name));
