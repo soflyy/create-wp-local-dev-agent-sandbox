@@ -110,6 +110,49 @@ if [[ "$APPLY" -ne 1 ]]; then
 fi
 
 # ---- apply ----------------------------------------------------------------
+#
+# Crash / Ctrl-C safety. The source is only ever READ, then renamed with one
+# atomic `mv` to $OLD_DIR — never deleted. So a failure at ANY point leaves the
+# full dataset in $DATA_DIR or $OLD_DIR. This trap kills the heartbeat and prints
+# state-specific recovery steps instead of leaving you at a bare prompt.
+STAGE="init"; DONE=0; HB=""
+on_exit() {
+  local code=$?
+  [[ -n "$HB" ]] && kill "$HB" 2>/dev/null || true
+  [[ "$DONE" == "1" || "$code" == "0" ]] && exit "$code"   # completed or dry-run
+  echo; hr
+  say "INTERRUPTED during: $STAGE  (exit $code)"
+  say "Your data is intact — the source is only read then atomically renamed to"
+  say "$OLD_DIR; nothing is ever deleted. Recover:"
+  case "$STAGE" in
+    stop|copy|verify)
+      say "  Nothing was swapped yet — $DATA_DIR still holds everything."
+      say "  1) bring the server back:   sudo systemctl start $SERVICE"
+      say "     (restart env containers from the UI if they were running)"
+      say "  2) the partial copy on the volume is harmless; to retry, clear it first:"
+      say "     sudo find '$VOLUME' -mindepth 1 ! -name lost+found -exec rm -rf {} +"
+      ;;
+    swap)
+      say "  Mid-swap. Check what exists:   ls -ld '$DATA_DIR' '$OLD_DIR'"
+      say "  Restore the original:"
+      say "     sudo umount '$DATA_DIR' 2>/dev/null; sudo rmdir '$DATA_DIR' 2>/dev/null"
+      say "     sudo mv '$OLD_DIR' '$DATA_DIR'   # if $DATA_DIR is missing/empty"
+      say "     remove any new '$DATA_DIR' / volume lines from /etc/fstab, then:"
+      say "     sudo systemctl start $SERVICE"
+      ;;
+    finish)
+      say "  Data is already migrated + bind-mounted; only startup didn't finish:"
+      say "     sudo systemctl start $SERVICE"
+      say "     docker start \$(the containers listed above) — or use the UI"
+      ;;
+  esac
+  hr
+  exit "$code"
+}
+trap 'exit 130' INT TERM   # funnel Ctrl-C / kill into the EXIT trap
+trap on_exit EXIT
+
+STAGE="stop"
 say ">> [1/5] stopping $SERVICE and env containers…"
 systemctl stop "$SERVICE" || die "could not stop $SERVICE"
 
@@ -130,10 +173,12 @@ if command -v docker >/dev/null; then
   fi
 fi
 
+STAGE="copy"
 say ">> [2/5] copying data to the volume (live progress below; ~10-15 min for tens of GB)…"
 # --info=progress2 streams a single updating line: % done, speed, and ETA.
 rsync -aHAX --numeric-ids --info=progress2 "$DATA_DIR"/ "$VOLUME"/
 
+STAGE="verify"
 say ">> [3/5] verifying the copy is byte-identical (re-scans every file on both"
 say "         sides — this stays quiet for a minute or two; the dots mean it's alive)…"
 # A second rsync in itemize+dry-run mode must report ZERO changes. It produces no
@@ -147,6 +192,7 @@ if [[ -n "$DIFF" ]]; then
 fi
 say "   verified: byte-identical."
 
+STAGE="swap"
 say ">> [4/5] swapping in the bind mount…"
 mv "$DATA_DIR" "$OLD_DIR"
 mkdir "$DATA_DIR"
@@ -173,6 +219,7 @@ mountpoint -q "$DATA_DIR" || die "bind mount failed — restore with: rmdir '$DA
 NEW_COUNT="$( [[ -f "$DATA_DIR/registry.json" ]] && node -e 'const r=require(process.argv[1]);console.log(Object.keys(r.environments||{}).length)' "$DATA_DIR/registry.json" 2>/dev/null || echo '?')"
 [[ "$NEW_COUNT" == "$ENV_COUNT" ]] || die "post-swap env count ($NEW_COUNT) != before ($ENV_COUNT). Investigate before starting; original safe at $OLD_DIR."
 
+STAGE="finish"
 say ">> [5/5] starting $SERVICE and restarting env containers…"
 systemctl start "$SERVICE"
 if [[ ${#RUNNING_CIDS[@]} -gt 0 ]]; then
@@ -191,3 +238,4 @@ say "    sudo sed -i '\\# $DATA_DIR #d' /etc/fstab"
 say "    sudo mv '$OLD_DIR' '$DATA_DIR'"
 say "    sudo systemctl start $SERVICE"
 hr
+DONE=1
