@@ -420,6 +420,9 @@ const MODELS = {
   ],
   codex: [
     { id: '', label: 'Default' },
+    { id: 'gpt-5.6-sol', label: 'gpt-5.6-sol (flagship)' },
+    { id: 'gpt-5.6-terra', label: 'gpt-5.6-terra (balanced)' },
+    { id: 'gpt-5.6-luna', label: 'gpt-5.6-luna (fast/cheap)' },
     { id: 'gpt-5.5', label: 'gpt-5.5' },
     { id: 'gpt-5.4', label: 'gpt-5.4' },
     { id: 'gpt-5.4-mini', label: 'gpt-5.4-mini' },
@@ -458,6 +461,7 @@ const MODELS = {
     { id: 'opencode/gpt-5', label: 'gpt-5' },
     { id: 'opencode/gpt-5-codex', label: 'gpt-5-codex' },
     { id: 'opencode/gpt-5-nano', label: 'gpt-5-nano' },
+    { id: 'opencode/grok-4.5', label: 'grok-4.5' },
     { id: 'opencode/grok-build-0.1', label: 'grok-build-0.1' },
     { id: 'opencode/deepseek-v4-pro', label: 'deepseek-v4-pro' },
     { id: 'opencode/deepseek-v4-flash', label: 'deepseek-v4-flash' },
