@@ -145,6 +145,18 @@ say "   verified: byte-identical."
 say ">> [4/5] swapping in the bind mount…"
 mv "$DATA_DIR" "$OLD_DIR"
 mkdir "$DATA_DIR"
+
+# Persist the volume's OWN mount first, by UUID (stable across reboots). Without
+# this a reboot leaves the volume unmounted and the bind mount would land on an
+# empty dir — DO's auto-format-mount doesn't always add the fstab line. Order
+# matters: the volume line must precede the bind line so the source mounts first.
+VOL_SRC="$(findmnt -no SOURCE --target "$VOLUME" || true)"
+VOL_UUID="$(blkid -s UUID -o value "$VOL_SRC" 2>/dev/null || true)"
+if [[ -n "$VOL_UUID" ]] && ! grep -qE "UUID=$VOL_UUID[[:space:]]|[[:space:]]$VOLUME[[:space:]]" /etc/fstab; then
+  echo "UUID=$VOL_UUID $VOLUME ext4 defaults,nofail,discard 0 0" >> /etc/fstab
+  say "   persisted volume mount in /etc/fstab (UUID=$VOL_UUID -> $VOLUME)"
+fi
+
 FSTAB_LINE="$VOLUME $DATA_DIR none bind 0 0"
 if ! grep -qF "$FSTAB_LINE" /etc/fstab; then
   echo "$FSTAB_LINE" >> /etc/fstab
