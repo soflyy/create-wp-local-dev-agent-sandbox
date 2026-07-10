@@ -56,6 +56,10 @@ function parseArgs(argv) {
 // PORT:PORT). These are published on the WORKSPACE service — the dev container
 // shares its network namespace (see templates/docker-compose.override.yml), so
 // one list covers servers started by the dev script AND by an agent.
+//
+// One published port per CONTAINER port: a later entry for the same container
+// port REPLACES the earlier one. That's what lets a CLI --app-ports=9101:3000
+// override a preset's bare 3000 instead of publishing both.
 function parseAppPorts(raw) {
   const ports = [];
   for (const entry of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
@@ -65,10 +69,11 @@ function parseAppPorts(raw) {
     if (!m || host < 1 || host > 65535 || container < 1 || container > 65535) {
       throw new Error(`--app-ports entry "${entry}" is invalid — expected PORT or HOST:CONTAINER (1-65535), e.g. --app-ports=3000 or --app-ports=9101:3000,9102:5173`);
     }
-    const dup = ports.find((p) => p.host === host);
-    if (dup) {
-      if (dup.container === container) continue; // identical mapping (e.g. preset + CLI both say 3000) — collapse
-      throw new Error(`--app-ports maps host port ${host} to both ${dup.container} and ${container}`);
+    const i = ports.findIndex((p) => p.container === container);
+    if (i >= 0) ports.splice(i, 1); // later mapping for this container port wins
+    const hostDup = ports.find((p) => p.host === host);
+    if (hostDup) {
+      throw new Error(`--app-ports maps host port ${host} to both ${hostDup.container} and ${container}`);
     }
     ports.push({ host, container });
   }
@@ -262,8 +267,8 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
     : (args.devCommand != null ? args.devCommand + '\n' : (preset.devScript ?? null));
   const cliDefines = args.defines ? await readDefinesFile(args.defines) : null;
 
-  // App ports: preset entries first, CLI entries appended — parseAppPorts
-  // normalizes and rejects duplicate host ports across the combined list.
+  // App ports: preset entries first, CLI entries after — so a CLI mapping for
+  // the same container port overrides the preset's (see parseAppPorts).
   const appPorts = parseAppPorts([...(preset.appPorts ?? []), ...args.appPorts.map((p) => `${p.host}:${p.container}`)].join(','));
 
   await mkdir(targetDir, { recursive: true });
@@ -353,7 +358,7 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
     console.log('  npm run claude       # launch Claude Code in the workspace');
     console.log('  npm run cursor       # launch the Cursor CLI agent in the workspace');
     console.log('');
-    console.log(`Once setup finishes, your site is at http://localhost:${args.port} — log in at /wp-admin with admin / password (default; set WP_ADMIN_USER / WP_ADMIN_PASSWORD in .env to change).`);
+    console.log(`Once setup finishes, your site is at http://${args.publicHost}:${args.port} — log in at /wp-admin with admin / password (default; set WP_ADMIN_USER / WP_ADMIN_PASSWORD in .env to change).`);
     return;
   }
 

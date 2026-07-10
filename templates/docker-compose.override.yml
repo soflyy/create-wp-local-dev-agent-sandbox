@@ -22,6 +22,12 @@ services:
     # workspace. Ports therefore can't be published here; publish them on the
     # workspace service. (Compose recreates this container alongside workspace
     # when needed — `npm run start` handles it.)
+    #
+    # ⚠ Footgun: recreating ONLY the workspace container (e.g. `docker compose
+    # up -d --force-recreate workspace`) leaves this one "Up" but attached to
+    # the DESTROYED network namespace — logs look fine, nothing is reachable.
+    # Recover with a plain `docker compose up -d` (or `npm run start`), which
+    # recreates both in order.
     network_mode: "service:workspace"
     environment:
       WORDPRESS_DB_HOST: db

@@ -125,6 +125,14 @@ export function loadConfig(env = process.env) {
 
   // Initial secret strings for the log redactor (env-seeded). Tokens managed in
   // Settings are added to the redactor after the settings store loads.
-  config.secrets = [config.seedGithubToken, config.seedClaudeToken, config.seedCodexToken, config.seedOpencodeToken].filter(Boolean);
+  // SANDBOX_SETUP_ENV_* values (setup secrets forwarded to every env's setup
+  // script) are included so a script that echoes one is scrubbed from server
+  // output AND the per-env setup log (see _spawnLogged). Best-effort: only the
+  // value as stored is known here — a script that transforms it (e.g. base64
+  // -d) before printing defeats this.
+  const setupEnvSecrets = Object.keys(env)
+    .filter((k) => k.startsWith('SANDBOX_SETUP_ENV_'))
+    .map((k) => env[k]);
+  config.secrets = [config.seedGithubToken, config.seedClaudeToken, config.seedCodexToken, config.seedOpencodeToken, ...setupEnvSecrets].filter(Boolean);
   return Object.freeze(config);
 }

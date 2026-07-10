@@ -564,8 +564,14 @@ export class Manager {
       });
       let timer;
       if (timeout) timer = setTimeout(() => child.kill('SIGKILL'), timeout);
-      child.stdout.pipe(stream, { end: false });
-      child.stderr.pipe(stream, { end: false });
+      // Redact known secrets from the setup log — it's served raw by
+      // GET /environments/:id/logs, so a setup script that echoes a forwarded
+      // secret must not put it behind a bearer-token read. Chunk-wise, so a
+      // secret split across two chunks can slip through — a backstop, not a
+      // guarantee (the real rule stays: setup scripts don't print secrets).
+      const writeRedacted = (chunk) => stream.write(redact(chunk.toString()));
+      child.stdout.on('data', writeRedacted);
+      child.stderr.on('data', writeRedacted);
       child.on('error', (err) => {
         if (timer) clearTimeout(timer);
         stream.end();

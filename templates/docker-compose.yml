@@ -69,6 +69,11 @@ services:
     build:
       context: .
       dockerfile: workspace.Dockerfile
+    # Come back up after a host reboot like the rest of the stack. Also required
+    # for the dev container, which joins this container's network namespace
+    # (see docker-compose.override.yml): its own `unless-stopped` restart fails
+    # if its netns owner isn't running.
+    restart: unless-stopped
     environment:
       WORDPRESS_DB_HOST: db
       WORDPRESS_DB_NAME: ${MARIADB_DATABASE}

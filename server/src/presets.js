@@ -82,7 +82,10 @@ if [ -n "\${SANDBOX_APP_PORT_3000:-}" ]; then
 fi
 
 if [ -n "\${LOCAL_DEV_APP_DOT_FUTURELAYER_DOT_ENV_FILE_CONTENTS_BASE64:-}" ]; then
-  printf '%s' "\$LOCAL_DEV_APP_DOT_FUTURELAYER_DOT_ENV_FILE_CONTENTS_BASE64" | base64 -d > /home/node/breakdance/apps/app-dot-futurelayer/.env
+  if ! printf '%s' "\$LOCAL_DEV_APP_DOT_FUTURELAYER_DOT_ENV_FILE_CONTENTS_BASE64" | base64 -d > /home/node/breakdance/apps/app-dot-futurelayer/.env; then
+    echo "ERROR: LOCAL_DEV_APP_DOT_FUTURELAYER_DOT_ENV_FILE_CONTENTS_BASE64 did not decode — is it valid base64 (base64 -w0 .env)?" >&2
+    exit 1
+  fi
   echo "wrote apps/app-dot-futurelayer/.env"
 else
   echo "WARNING: LOCAL_DEV_APP_DOT_FUTURELAYER_DOT_ENV_FILE_CONTENTS_BASE64 not set — the FutureLayer app will run without secrets"
