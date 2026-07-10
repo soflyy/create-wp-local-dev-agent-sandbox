@@ -95,6 +95,7 @@ function EnvRow({ env, onAction }) {
         <${StatusDot} status=${env.status} /> <span class="env-name" title=${env.displayName ? `${env.displayName} · ${env.name}` : env.name}>${env.displayName || env.name}</span>
         ${env.preset && html`<span class="badge" title="provisioned from preset">${env.preset}</span>`}
         <a class="env-port" href=${wpUrl} target="_blank" rel="noreferrer" title="Open the site front end" onClick=${(e) => e.stopPropagation()}>:${env.port}</a>
+        ${(env.appPorts || []).map((p) => html`<a class="env-port" href=${`${location.protocol}//${location.hostname}:${p.host}/`} target="_blank" rel="noreferrer" title=${`App port → container :${p.container}`} onClick=${(e) => e.stopPropagation()}>:${p.host}<span class="muted small">→${p.container}</span></a>`)}
         ${up && html`<button class="env-admin lnk" title="One-click passwordless wp-admin login" onClick=${(e) => { e.stopPropagation(); onAction('admin-login', env); }}>admin ↗</button>`}
       </div>
       <div class="env-actions">
@@ -606,6 +607,7 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
   const [devScript, setDevScript] = useState('');
   const [definesText, setDefinesText] = useState('');
   const [activateText, setActivateText] = useState('');
+  const [appPortsText, setAppPortsText] = useState('');
   const [presetName, setPresetName] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -624,8 +626,10 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
       defines = parsed;
     }
     const activate = activateText.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
-    if (!setupScript.trim() && !devScript.trim() && !dt && !activate.length) return null;
-    return { setupScript, devScript, defines, activate };
+    const appPorts = appPortsText.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean).map((s) => parseInt(s, 10));
+    if (appPorts.some((p) => !Number.isInteger(p) || p < 1 || p > 65535)) throw new Error('App ports must be container port numbers (1-65535), e.g. 3000.');
+    if (!setupScript.trim() && !devScript.trim() && !dt && !activate.length && !appPorts.length) return null;
+    return { setupScript, devScript, defines, activate, appPorts };
   };
 
   const create = async () => {
@@ -691,6 +695,9 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
           </label>
           <label>Activate plugins <span class="muted small">— slugs, in order, comma-separated</span>
             <input value=${activateText} placeholder="oxygen-elements, breakdance-elements" onInput=${(e) => setActivateText(e.target.value)} />
+          </label>
+          <label>App ports <span class="muted small">— container ports of dev servers to publish (each env gets a unique host port; shown next to the site link)</span>
+            <input value=${appPortsText} placeholder="3000" onInput=${(e) => setAppPortsText(e.target.value)} />
           </label>
           <div class="row save-preset">
             <input value=${presetName} placeholder="Save these custom fields as a preset named…" onInput=${(e) => setPresetName(e.target.value)} />

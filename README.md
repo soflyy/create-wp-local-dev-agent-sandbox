@@ -96,6 +96,25 @@ On the first `npm run setup` the **one-time** steps run in order: install WordPr
 
 - **`--activate=a,b,c`** — plugin slugs to activate, in this exact order, **after** the setup script. This is for plugins that are already present (e.g. dropped into `wp-content` by your script) — there's nothing to download, just activate. For plugins installed from wordpress.org or a `.zip`, use `plugins` in `sandbox.config.json` (see below) instead.
 
+- **`--app-ports=LIST`** — host ports to publish on the **workspace** container for dev servers your setup/dev scripts run — e.g. a Next.js app on 3000. A bare `3000` publishes `3000:3000`; `9101:3000` maps host 9101 to container 3000; comma-separate for several (one mapping per container port — a later entry for the same container port replaces the earlier one, so a CLI flag overrides a preset's). The `dev` container **shares the workspace's network namespace**, so one list covers a server started by the dev script *or* by an agent in the workspace — and other containers (WordPress PHP, the Playwright browser) reach it at `http://workspace:<port>` either way. The server must listen on `0.0.0.0` (most dev servers, incl. `next dev`, do by default) — one bound to `127.0.0.1` is invisible to the published port *and* to other containers. ⚠️ Published ports bind `0.0.0.0` and **bypass ufw-style host firewalls**; on an internet-facing host, restrict them upstream (cloud firewall/VPN).
+
+- **`--public-host=HOST`** — the hostname/IP *browsers* use to reach this Docker host (default `localhost`; set your server's IP or a DNS name on a remote box). Written to `.env` as `PUBLIC_HOST`. Nothing binds to it — it exists so setup scripts can build URLs that are valid outside the Docker network.
+
+### Environment passed to setup scripts
+
+The setup script runs with these variables, so it can wire URLs without hardcoding ports:
+
+- `SANDBOX_PUBLIC_HOST` — the `--public-host` value.
+- `SANDBOX_WP_PORT` — the site's published host port (`--port`).
+- `SANDBOX_APP_PORT_<container>` — the host port for each `--app-ports` entry (e.g. `--app-ports=9101:3000` → `SANDBOX_APP_PORT_3000=9101`).
+- **`SANDBOX_SETUP_ENV_<NAME>` passthrough** — any variable with this prefix in the environment of `npm run setup` reaches the script as plain `<NAME>`, the same pattern as a GitHub Codespaces secret. Use it to hand secrets (API keys, a whole `.env` file) to provisioning without baking them into the script. Values are forwarded by name (never on a command line), but your script's own `echo`s can still leak them — don't print them. Multiline values can't survive an env file, so store those **base64-encoded** and decode in the script:
+
+  ```bash
+  # host:  export SANDBOX_SETUP_ENV_MY_APP_DOTENV_BASE64="$(base64 -w0 .env)"
+  # setup script:
+  printf '%s' "$MY_APP_DOTENV_BASE64" | base64 -d > /home/node/my-app/.env
+  ```
+
 A worked example (Breakdance) lives in [`examples/`](examples/).
 
 ### `sandbox.config.json`
@@ -121,6 +140,7 @@ The flags above just write into this file; you can also edit it directly and `np
 - `setupScript` — project-relative path to the one-time script run in the workspace (`--setup-script` copies your file here as `scripts/user-setup.sh`).
 - `devScript` — project-relative path to the long-running dev script (`--dev-script` / `--dev-command` writes it to `scripts/dev.sh` and adds the `dev` service via `docker-compose.override.yml`). Edit `scripts/dev.sh` and `npm run restart` to change what it runs.
 - `activate` — slugs activated in order, after `setupScript` (see `--activate` above).
+- `appPorts` — `[{ "host": 9101, "container": 3000 }]` pairs published on the workspace container (see `--app-ports` above). Recorded here so `SANDBOX_APP_PORT_<container>` is re-derived on every `npm run setup`; the actual publishing lives in `docker-compose.yml`, so editing this alone doesn't open a port.
 
 ## Requirements
 

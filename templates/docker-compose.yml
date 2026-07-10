@@ -69,6 +69,11 @@ services:
     build:
       context: .
       dockerfile: workspace.Dockerfile
+    # Come back up after a host reboot like the rest of the stack. Also required
+    # for the dev container, which joins this container's network namespace
+    # (see docker-compose.override.yml): its own `unless-stopped` restart fails
+    # if its netns owner isn't running.
+    restart: unless-stopped
     environment:
       WORDPRESS_DB_HOST: db
       WORDPRESS_DB_NAME: ${MARIADB_DATABASE}
@@ -80,6 +85,7 @@ services:
       # doesn't print its acceptance warning. Set on the container, so it's also
       # inherited by `docker compose exec` (how `npm run claude` reaches Claude).
       IS_SANDBOX: "1"
+__APP_PORTS__
     volumes:
       # Workspace root + home: persists your Claude login, shell history, your
       # plugin/theme checkouts, and WordPress itself (nested at ./wp inside it).

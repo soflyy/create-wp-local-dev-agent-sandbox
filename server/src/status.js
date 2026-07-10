@@ -53,6 +53,9 @@ export function publicView(record, { status }) {
     // (cd into it, then `npm run claude` for the interactive TUI).
     dir: record.dir,
     port: record.port,
+    // Host-published dev-server ports ({ host, container }) — the UI links them
+    // like `port`, rebased on the browser's hostname.
+    appPorts: record.appPorts ?? [],
     wpUrl: record.wpUrl,
     status,
     preset: record.preset || null,

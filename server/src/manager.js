@@ -98,7 +98,9 @@ export class Manager {
 
   async createEnvironment({ name, provision, prompt, model, agent } = {}) {
     this._assertRunRoom(); // a create boots immediately — count it against maxRunning
-    const record = await allocate(this.registry, this.config, { nameHint: name });
+    // The provision's app (container) ports get their host ports reserved here,
+    // atomically with the WP port.
+    const record = await allocate(this.registry, this.config, { nameHint: name, appPorts: provision?.appPorts ?? [] });
     this.jobs.set(record.id, 'scaffolding');
     // Materialize the provisioning inputs to files the scaffolder can read, and
     // record the preset name (if any) for display. Done before the (async)
@@ -162,6 +164,8 @@ export class Manager {
         join(config.scaffolderDir, 'index.js'),
         record.dir,
         `--port=${record.port}`,
+        `--public-host=${config.publicHost}`,
+        ...(record.appPorts?.length ? [`--app-ports=${record.appPorts.map((p) => `${p.host}:${p.container}`).join(',')}`] : []),
         ...(provisionPlan ? provisionPlan.args : []),
       ];
       await this.buildSem.run(() =>
@@ -461,7 +465,7 @@ export class Manager {
     if (!preset) return;
     this._assertRunRoom({ pool: true }); // a build boots the stack before stopping it
     const provision = composeProvision([preset], null);
-    const record = await allocate(this.registry, this.config, { pool: presetId });
+    const record = await allocate(this.registry, this.config, { pool: presetId, appPorts: provision?.appPorts ?? [] });
     this.jobs.set(record.id, 'scaffolding');
     await this.registry.update(record.id, { preset: preset.name });
     const provisionPlan = provision ? await this._materializeProvision(record, provision) : null;
@@ -560,8 +564,14 @@ export class Manager {
       });
       let timer;
       if (timeout) timer = setTimeout(() => child.kill('SIGKILL'), timeout);
-      child.stdout.pipe(stream, { end: false });
-      child.stderr.pipe(stream, { end: false });
+      // Redact known secrets from the setup log — it's served raw by
+      // GET /environments/:id/logs, so a setup script that echoes a forwarded
+      // secret must not put it behind a bearer-token read. Chunk-wise, so a
+      // secret split across two chunks can slip through — a backstop, not a
+      // guarantee (the real rule stays: setup scripts don't print secrets).
+      const writeRedacted = (chunk) => stream.write(redact(chunk.toString()));
+      child.stdout.on('data', writeRedacted);
+      child.stderr.on('data', writeRedacted);
       child.on('error', (err) => {
         if (timer) clearTimeout(timer);
         stream.end();

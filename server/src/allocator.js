@@ -52,8 +52,11 @@ async function freeDiskGb(path) {
 }
 
 // Returns the reservation record (already persisted into the registry with
-// status "scaffolding").
-export async function allocate(registry, config, { nameHint, pool = null } = {}) {
+// status "scaffolding"). `appPorts` is a list of CONTAINER ports the env's
+// provisioning wants published (e.g. [3000] for a Next.js dev server); each
+// gets a unique HOST port from the same range as the WP port, recorded as
+// record.appPorts = [{ host, container }].
+export async function allocate(registry, config, { nameHint, pool = null, appPorts = [] } = {}) {
   return registry.mutate(async (data) => {
     const envs = Object.values(data.environments);
     // Warm-pool builds must leave a reserve of free slots for on-demand creates,
@@ -102,18 +105,25 @@ export async function allocate(registry, config, { nameHint, pool = null } = {})
       } while (usedNames.has(name) || existingProjects.has(name));
     }
 
-    // Resolve a unique, currently-free port in the configured range.
-    const usedPorts = new Set(envs.map((e) => e.port));
-    let port = null;
-    for (let p = config.portRange.lo; p <= config.portRange.hi; p += 1) {
-      if (usedPorts.has(p)) continue;
-      if (await isPortFree(p)) {
-        port = p;
-        break;
+    // Resolve unique, currently-free host ports in the configured range: the
+    // WP port first, then one per requested app (container) port. One shared
+    // used-set covers every env's WP port AND app ports, so allocations can't
+    // collide across environments.
+    const usedPorts = new Set(envs.flatMap((e) => [e.port, ...(e.appPorts ?? []).map((ap) => ap.host)]));
+    const takePort = async () => {
+      for (let p = config.portRange.lo; p <= config.portRange.hi; p += 1) {
+        if (usedPorts.has(p)) continue;
+        if (await isPortFree(p)) {
+          usedPorts.add(p);
+          return p;
+        }
       }
-    }
-    if (port === null) {
       throw new AllocationError(`no free port in range ${config.portRange.lo}-${config.portRange.hi}`, 503);
+    };
+    const port = await takePort();
+    const allocatedAppPorts = [];
+    for (const container of appPorts) {
+      allocatedAppPorts.push({ host: await takePort(), container });
     }
 
     const id = `env_${randomBytes(5).toString('hex')}`;
@@ -127,6 +137,9 @@ export async function allocate(registry, config, { nameHint, pool = null } = {})
       project: name,
       dir,
       port,
+      // Host-published dev-server ports ({ host, container }), allocated from
+      // the same range as `port`. Empty for envs that don't publish any.
+      appPorts: allocatedAppPorts,
       wpUrl: `http://localhost:${port}`,
       status: 'scaffolding',
       createdAt: new Date().toISOString(),
