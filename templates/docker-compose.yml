@@ -80,6 +80,7 @@ services:
       # doesn't print its acceptance warning. Set on the container, so it's also
       # inherited by `docker compose exec` (how `npm run claude` reaches Claude).
       IS_SANDBOX: "1"
+__APP_PORTS__
     volumes:
       # Workspace root + home: persists your Claude login, shell history, your
       # plugin/theme checkouts, and WordPress itself (nested at ./wp inside it).

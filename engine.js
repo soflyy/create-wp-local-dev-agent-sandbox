@@ -34,13 +34,15 @@ const ALLOWED_EXISTING = new Set([
 ]);
 
 function parseArgs(argv) {
-  const out = { dir: null, port: '8080', setup: true, setupScript: null, defines: null, activate: [], devScript: null, devCommand: null };
+  const out = { dir: null, port: '8080', setup: true, setupScript: null, defines: null, activate: [], devScript: null, devCommand: null, appPorts: [], publicHost: 'localhost' };
   for (const a of argv) {
     if (a.startsWith('--port=')) out.port = a.slice('--port='.length);
     else if (a.startsWith('--setup-script=')) out.setupScript = a.slice('--setup-script='.length);
     else if (a.startsWith('--dev-script=')) out.devScript = a.slice('--dev-script='.length);
     else if (a.startsWith('--dev-command=')) out.devCommand = a.slice('--dev-command='.length);
     else if (a.startsWith('--defines=')) out.defines = a.slice('--defines='.length);
+    else if (a.startsWith('--app-ports=')) out.appPorts = parseAppPorts(a.slice('--app-ports='.length));
+    else if (a.startsWith('--public-host=')) out.publicHost = a.slice('--public-host='.length).trim() || 'localhost';
     else if (a.startsWith('--activate=')) {
       out.activate = a.slice('--activate='.length).split(',').map((s) => s.trim()).filter(Boolean);
     } else if (a === '--scaffold-only') out.setup = false;
@@ -48,6 +50,56 @@ function parseArgs(argv) {
     else if (!a.startsWith('-') && out.dir === null) out.dir = a;
   }
   return out;
+}
+
+// Parse --app-ports: comma-separated HOST:CONTAINER pairs (a bare PORT means
+// PORT:PORT). These are published on the WORKSPACE service — the dev container
+// shares its network namespace (see templates/docker-compose.override.yml), so
+// one list covers servers started by the dev script AND by an agent.
+function parseAppPorts(raw) {
+  const ports = [];
+  for (const entry of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+    const m = entry.match(/^(\d{1,5})(?::(\d{1,5}))?$/);
+    const host = m ? parseInt(m[1], 10) : NaN;
+    const container = m ? parseInt(m[2] ?? m[1], 10) : NaN;
+    if (!m || host < 1 || host > 65535 || container < 1 || container > 65535) {
+      throw new Error(`--app-ports entry "${entry}" is invalid — expected PORT or HOST:CONTAINER (1-65535), e.g. --app-ports=3000 or --app-ports=9101:3000,9102:5173`);
+    }
+    const dup = ports.find((p) => p.host === host);
+    if (dup) {
+      if (dup.container === container) continue; // identical mapping (e.g. preset + CLI both say 3000) — collapse
+      throw new Error(`--app-ports maps host port ${host} to both ${dup.container} and ${container}`);
+    }
+    ports.push({ host, container });
+  }
+  return ports;
+}
+
+// Render the workspace service's published-ports block (replaces the
+// __APP_PORTS__ placeholder line in templates/docker-compose.yml). Without
+// --app-ports it renders as a how-to comment, so the generated file stays
+// self-documenting.
+function renderAppPortsBlock(appPorts) {
+  if (!appPorts.length) {
+    return [
+      '    # No app ports are published (scaffolded without --app-ports). To reach a',
+      '    # dev server running in this container (or the dev container, which shares',
+      '    # its network namespace) from the host, add e.g.:',
+      '    #   ports:',
+      '    #     - "3000:3000"',
+      '    # then `npm run start`. Published ports bind 0.0.0.0 and BYPASS ufw-style',
+      '    # host firewalls — on an internet-facing host, restrict them upstream.',
+    ].join('\n');
+  }
+  return [
+    '    # Host-published app ports (--app-ports): dev servers listening on the',
+    '    # container port (started here or by the dev script — the dev container',
+    '    # shares this network namespace) are reachable on the host port. Published',
+    '    # ports bind 0.0.0.0 and BYPASS ufw-style host firewalls — on an',
+    '    # internet-facing host, restrict them upstream (cloud firewall/VPN).',
+    '    ports:',
+    ...appPorts.map((p) => `      - "${p.host}:${p.container}"`),
+  ].join('\n');
 }
 
 function usage(pkg, create) {
@@ -74,6 +126,16 @@ Options:
                         wp-config.php as constants (via \`wp config set\`).
   --activate=a,b,c      Plugin slugs to activate, in this exact order, after the
                         setup script runs (for plugins it dropped into wp-content).
+  --app-ports=LIST      Comma-separated host ports to publish on the workspace
+                        container for dev servers (a bare PORT means PORT:PORT;
+                        HOST:CONTAINER maps them), e.g. --app-ports=3000 or
+                        --app-ports=9101:3000. The dev container shares the
+                        workspace's network namespace, so these cover servers
+                        started by the dev script too. Exposed to setup scripts
+                        as SANDBOX_APP_PORT_<container>=<host>.
+  --public-host=HOST    Hostname/IP browsers use to reach this Docker host
+                        (default: localhost). Written to .env as PUBLIC_HOST and
+                        exposed to setup scripts as SANDBOX_PUBLIC_HOST.
   --scaffold-only       Only write files; skip the automatic \`npm run setup\`
 `);
 }
@@ -110,6 +172,8 @@ async function copyTemplates(srcDir, destDir, vars) {
       const rendered = (await readFile(src, 'utf8'))
         .replaceAll('__PROJECT_NAME__', vars.projectName)
         .replaceAll('__WP_PORT__', vars.port)
+        .replaceAll('__PUBLIC_HOST__', vars.publicHost)
+        .replaceAll('__APP_PORTS__', vars.appPortsBlock)
         .replaceAll('__WP_ADMIN_USER__', vars.wpAdminUser)
         .replaceAll('__WP_ADMIN_PASSWORD__', vars.wpAdminPassword)
         .replaceAll('__WP_ADMIN_EMAIL__', vars.wpAdminEmail);
@@ -135,6 +199,9 @@ async function applyConfig(targetDir, extra) {
   }
   if (extra.setupScript) cfg.setupScript = extra.setupScript;
   if (extra.devScript) cfg.devScript = extra.devScript;
+  // Published app ports, recorded so scripts/run-setup-script.sh can export
+  // SANDBOX_APP_PORT_<container> to the setup script.
+  if (extra.appPorts?.length) cfg.appPorts = extra.appPorts;
   await writeFile(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
 }
 
@@ -166,6 +233,8 @@ async function readDefinesFile(path) {
  * @param {object} [options.preset.defines]    { NAME: value } constants written into wp-config.php.
  * @param {string} [options.preset.setupScript] Shell-script contents run inside the workspace on setup.
  * @param {string} [options.preset.devScript]  Shell-script contents run in the long-running 'dev' container.
+ * @param {Array<number|string>} [options.preset.appPorts] Ports published on the workspace container
+ *                                             (a number N means N:N; "HOST:CONTAINER" maps them).
  * @param {string[]} [options.argv]            CLI args (default: process.argv.slice(2)).
  */
 export async function create({ preset = {}, argv = process.argv.slice(2) } = {}) {
@@ -193,6 +262,10 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
     : (args.devCommand != null ? args.devCommand + '\n' : (preset.devScript ?? null));
   const cliDefines = args.defines ? await readDefinesFile(args.defines) : null;
 
+  // App ports: preset entries first, CLI entries appended — parseAppPorts
+  // normalizes and rejects duplicate host ports across the combined list.
+  const appPorts = parseAppPorts([...(preset.appPorts ?? []), ...args.appPorts.map((p) => `${p.host}:${p.container}`)].join(','));
+
   await mkdir(targetDir, { recursive: true });
 
   const existing = await readdir(targetDir).catch(() => []);
@@ -210,6 +283,8 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
   await copyTemplates(TEMPLATES, targetDir, {
     projectName,
     port: String(args.port),
+    publicHost: args.publicHost,
+    appPortsBlock: renderAppPortsBlock(appPorts),
     wpAdminUser: userConfig.wpAdminUser || 'admin',
     wpAdminPassword: userConfig.wpAdminPassword || 'password',
     wpAdminEmail: userConfig.wpAdminEmail || 'admin@example.com',
@@ -242,6 +317,7 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
     defines: { ...(preset.defines ?? {}), ...(cliDefines ?? {}) },
     setupScript: setupScriptRel,
     devScript: devScriptRel,
+    appPorts,
   });
 
   // Pre-create the bind-mount host dirs (see docker-compose.yml). If they don't
@@ -303,10 +379,13 @@ export async function create({ preset = {}, argv = process.argv.slice(2) } = {})
   console.log('');
   console.log('───────────────────────────────────────────────');
   console.log('  Your WordPress site is ready:');
-  console.log(`    Site:     http://localhost:${args.port}`);
-  console.log(`    Admin:    http://localhost:${args.port}/wp-admin`);
+  console.log(`    Site:     http://${args.publicHost}:${args.port}`);
+  console.log(`    Admin:    http://${args.publicHost}:${args.port}/wp-admin`);
   console.log('    Username: admin');
   console.log('    Password: password');
+  for (const p of appPorts) {
+    console.log(`    App:      http://${args.publicHost}:${p.host} → workspace:${p.container}`);
+  }
   console.log('───────────────────────────────────────────────');
   console.log('');
 }

@@ -56,6 +56,11 @@ export function loadConfig(env = process.env) {
     // + sandbox.config.json), so these are throwaway and cleaned up after scaffold.
     scratchDir: join(dataDir, 'scratch'),
 
+    // The hostname/IP browsers use to reach this Docker host — handed to the
+    // scaffolder as --public-host so setup scripts can build browser-valid URLs
+    // (SANDBOX_PUBLIC_HOST). On a remote box set the public IP or a DNS name.
+    publicHost: env.DEVBOX_PUBLIC_HOST || 'localhost',
+
     // Allocation / limits
     portRange: parseRange(env.WP_PORT_RANGE, '9000-9999'),
     // Two independent caps, because stored and running envs cost different

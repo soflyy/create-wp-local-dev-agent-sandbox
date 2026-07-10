@@ -3,11 +3,12 @@
 // the route layer (on-demand creates) and the manager (warm-pool builds).
 //
 // setup scripts run sequentially, dev scripts run concurrently in the single dev
-// container, defines merge (later wins), activate lists concatenate (deduped).
+// container, defines merge (later wins), activate lists concatenate (deduped),
+// app (container) ports union — the allocator assigns each a unique host port.
 // Returns null when there's nothing to provision.
 export function composeProvision(presets, custom) {
   const parts = presets.map((p) => ({
-    label: p.name, setupScript: p.setupScript, devScript: p.devScript, defines: p.defines, activate: p.activate,
+    label: p.name, setupScript: p.setupScript, devScript: p.devScript, defines: p.defines, activate: p.activate, appPorts: p.appPorts,
   }));
   if (custom) parts.push({ label: 'Custom', ...custom });
   if (!parts.length) return null;
@@ -31,7 +32,8 @@ export function composeProvision(presets, custom) {
   const defines = Object.assign({}, ...parts.map((p) => p.defines || {}));
   const activate = [];
   for (const p of parts) for (const s of p.activate || []) if (!activate.includes(s)) activate.push(s);
+  const appPorts = [...new Set(parts.flatMap((p) => p.appPorts || []))];
 
-  if (!setupScript && !devScript && !activate.length && !Object.keys(defines).length) return null;
-  return { setupScript, devScript, defines, activate, presetName: presets.map((p) => p.name).join(' + ') || null };
+  if (!setupScript && !devScript && !activate.length && !Object.keys(defines).length && !appPorts.length) return null;
+  return { setupScript, devScript, defines, activate, appPorts, presetName: presets.map((p) => p.name).join(' + ') || null };
 }

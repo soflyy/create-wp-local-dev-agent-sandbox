@@ -60,6 +60,42 @@ cd /home/node/breakdance
 npm run dev:codespace
 `;
 
+// FutureLayer = Breakdance-from-source + the app-dot-futurelayer Next.js app
+// (which \`npm run dev:codespace\` also starts, on container port 3000 — pair
+// with appPorts: [3000] so browsers can reach it). This block wires WP to the
+// local app the way the monorepo's GitHub Codespace did:
+//   - plugin URL overrides: PHP → http://workspace:3000 (the dev container
+//     shares the workspace's network namespace); browser → the published host
+//     port (SANDBOX_APP_PORT_3000 @ SANDBOX_PUBLIC_HOST).
+//   - the app's .env, decoded from the base64 server secret forwarded as
+//     LOCAL_DEV_APP_DOT_FUTURELAYER_DOT_ENV_FILE_CONTENTS_BASE64 (see
+//     "Setup secrets" in README.md). Without it the app boots with every
+//     integration (Clerk, Supabase, OpenAI, …) dead.
+//   - the canonical-upload-URLs mu-plugin, pinned to this env's public URL, so
+//     uploads made via http://wordpress (Playwright/MCP) don't save that
+//     internal host into attachment URLs.
+const FUTURELAYER_SETUP_SCRIPT = `${BREAKDANCE_SETUP_SCRIPT}
+# ---- FutureLayer app (app-dot-futurelayer) ----
+wp option update futurelayer_app_url_override_backend "http://workspace:3000"
+if [ -n "\${SANDBOX_APP_PORT_3000:-}" ]; then
+  wp option update futurelayer_app_url_override_browser "http://\${SANDBOX_PUBLIC_HOST:-localhost}:\${SANDBOX_APP_PORT_3000}"
+fi
+
+if [ -n "\${LOCAL_DEV_APP_DOT_FUTURELAYER_DOT_ENV_FILE_CONTENTS_BASE64:-}" ]; then
+  printf '%s' "\$LOCAL_DEV_APP_DOT_FUTURELAYER_DOT_ENV_FILE_CONTENTS_BASE64" | base64 -d > /home/node/breakdance/apps/app-dot-futurelayer/.env
+  echo "wrote apps/app-dot-futurelayer/.env"
+else
+  echo "WARNING: LOCAL_DEV_APP_DOT_FUTURELAYER_DOT_ENV_FILE_CONTENTS_BASE64 not set — the FutureLayer app will run without secrets"
+fi
+
+MU_SRC=/home/node/breakdance/.devcontainer/mu-plugin-canonical-upload-urls.php
+if [ -f "\$MU_SRC" ]; then
+  mkdir -p /home/node/wp/wp-content/mu-plugins
+  cp -f "\$MU_SRC" /home/node/wp/wp-content/mu-plugins/canonical-upload-urls.php
+  wp config set FUTURELAYER_DEV_CANONICAL_URL "http://\${SANDBOX_PUBLIC_HOST:-localhost}:\${SANDBOX_WP_PORT:-80}" --type=constant
+fi
+`;
+
 // Agent Connector (dev): replace the release-zip gateway the scaffolder installs
 // with a live git checkout of the repo, so an agent develops the real plugin.
 // Runs as a setup script (cwd /home/node); the scaffolder's install-agent-connector.sh
@@ -123,12 +159,13 @@ const SEED_PRESETS = [
   },
   {
     name: 'FutureLayer',
-    description: 'Breakdance + the FutureLayer plugin, built from soflyy/breakdance.',
-    setupScript: BREAKDANCE_SETUP_SCRIPT,
+    description: 'Breakdance + the FutureLayer plugin and app-dot-futurelayer (Next.js, published on an app port), built from soflyy/breakdance.',
+    setupScript: FUTURELAYER_SETUP_SCRIPT,
     defines: { BREAKDANCE_MODE: 'breakdance', ...BREAKDANCE_BASE_DEFINES },
     // Breakdance order, then breakdance-ai, then futurelayer-plugin.
     activate: ['breakdance-elements', 'breakdance-main', 'breakdance-woocommerce', 'breakdance-ai', 'futurelayer-plugin'],
     devScript: BREAKDANCE_DEV_SCRIPT,
+    appPorts: [3000],
   },
   {
     name: 'Agent Connector (dev)',
@@ -226,6 +263,9 @@ function sanitize(input = {}) {
       input.defines && typeof input.defines === 'object' && !Array.isArray(input.defines) ? input.defines : {},
     activate: Array.isArray(input.activate)
       ? input.activate.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim())
+      : [],
+    appPorts: Array.isArray(input.appPorts)
+      ? [...new Set(input.appPorts.map((p) => parseInt(p, 10)).filter((p) => Number.isInteger(p) && p >= 1 && p <= 65535))]
       : [],
   };
 }

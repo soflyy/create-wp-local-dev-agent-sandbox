@@ -48,6 +48,33 @@ for v in GH_TOKEN GITHUB_TOKEN; do
   if [ -n "${!v:-}" ]; then exec_args+=(-e "$v"); fi
 done
 
+# Tell the setup script where this environment lives, so it can build URLs that
+# are valid outside the Docker network (dev-app browser URLs, canonical hosts):
+#   SANDBOX_PUBLIC_HOST          — PUBLIC_HOST from .env (--public-host)
+#   SANDBOX_WP_PORT              — the site's published host port
+#   SANDBOX_APP_PORT_<container> — host port for each --app-ports entry
+# All are exported by name (-e NAME), so values stay off the command line.
+export SANDBOX_PUBLIC_HOST="$(grep -E '^PUBLIC_HOST=' .env | head -1 | cut -d= -f2-)"
+export SANDBOX_WP_PORT="$(grep -E '^WP_PORT=' .env | head -1 | cut -d= -f2-)"
+exec_args+=(-e SANDBOX_PUBLIC_HOST -e SANDBOX_WP_PORT)
+while IFS= read -r pair; do
+  [ -n "$pair" ] || continue
+  export "SANDBOX_APP_PORT_${pair%%=*}=${pair#*=}"
+  exec_args+=(-e "SANDBOX_APP_PORT_${pair%%=*}")
+done < <(node -e '
+  const cfg = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  for (const p of cfg.appPorts || []) console.log(`${p.container}=${p.host}`);
+' "$CONFIG")
+
+# Pass through operator-provided setup secrets: any SANDBOX_SETUP_ENV_<NAME> in
+# this process's environment reaches the script as plain <NAME> — the same
+# pattern as a GitHub Codespaces secret. Multiline values can't survive an
+# env file, so store them base64-encoded and decode in the setup script.
+while IFS= read -r name; do
+  export "${name#SANDBOX_SETUP_ENV_}=${!name}"
+  exec_args+=(-e "${name#SANDBOX_SETUP_ENV_}")
+done < <(compgen -A variable | grep '^SANDBOX_SETUP_ENV_.' || true)
+
 docker compose exec "${exec_args[@]}" workspace bash -s < "$SCRIPT"
 
 echo "✓ Setup script complete."

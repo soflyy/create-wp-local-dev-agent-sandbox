@@ -113,13 +113,13 @@ export function buildRoutes(config, registry, manager, sessions, presets, settin
         if (presetIds.length === 1 && !custom) {
           const claimed = await manager.claimAndStart(presetIds[0], { name: ctx.body.name, prompt: prompt || undefined, model, agent });
           if (claimed) {
-            ctx.send(202, { id: claimed.id, name: claimed.name, port: claimed.port, wpUrl: claimed.wpUrl, status: 'configuring', warm: true });
+            ctx.send(202, { id: claimed.id, name: claimed.name, port: claimed.port, appPorts: claimed.appPorts ?? [], wpUrl: claimed.wpUrl, status: 'configuring', warm: true });
             return;
           }
         }
 
         const record = await manager.createEnvironment({ name: ctx.body.name, provision, prompt: prompt || undefined, model, agent });
-        ctx.send(202, { id: record.id, name: record.name, port: record.port, wpUrl: record.wpUrl, status: record.status });
+        ctx.send(202, { id: record.id, name: record.name, port: record.port, appPorts: record.appPorts ?? [], wpUrl: record.wpUrl, status: record.status });
       } catch (err) {
         if (err instanceof AllocationError) throw httpErr(err.status, err.message);
         throw err;
@@ -367,7 +367,19 @@ function validateProvisionFields(body = {}) {
     for (const k of Object.keys(defines)) if (!CONST_RE.test(k)) throw httpErr(400, `invalid define name "${k}"`);
   }
 
-  return { setupScript, devScript, activate, defines };
+  // Container ports to publish per env (each gets a unique host port from the
+  // allocator), e.g. [3000] for a Next.js dev server.
+  let appPorts = [];
+  if (body.appPorts != null) {
+    if (!Array.isArray(body.appPorts)) throw httpErr(400, 'appPorts must be an array of container ports, e.g. [3000]');
+    appPorts = body.appPorts.map((p) => parseInt(p, 10));
+    for (const p of appPorts) {
+      if (!Number.isInteger(p) || p < 1 || p > 65535) throw httpErr(400, `invalid app port "${p}" — expected an integer 1-65535`);
+    }
+    appPorts = [...new Set(appPorts)];
+  }
+
+  return { setupScript, devScript, activate, defines, appPorts };
 }
 
 // A preset additionally carries name/description.
@@ -381,9 +393,9 @@ function validatePreset(body = {}) {
 // specified (a blank WordPress env, or presets-only).
 function normalizeProvision(body) {
   if (!body || typeof body !== 'object') return null;
-  const { setupScript, devScript, activate, defines } = validateProvisionFields(body);
-  if (!setupScript && !devScript && !activate.length && !Object.keys(defines).length) return null;
-  return { setupScript, devScript, activate, defines };
+  const { setupScript, devScript, activate, defines, appPorts } = validateProvisionFields(body);
+  if (!setupScript && !devScript && !activate.length && !Object.keys(defines).length && !appPorts.length) return null;
+  return { setupScript, devScript, activate, defines, appPorts };
 }
 
 // composeProvision lives in provision.js (shared with the warm-pool builder in

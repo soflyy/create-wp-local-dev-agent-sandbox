@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim
+FROM node:24-bookworm-slim
 
 # PHP + the extensions WP-CLI needs (mysql for DB, curl/zip for installs, etc.)
 # plus the mysql client for `wp db ...`, git, and curl for general use.
