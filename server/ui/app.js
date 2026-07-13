@@ -597,7 +597,7 @@ function LogViewer({ env, onClose }) {
     </div>`;
 }
 
-function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset }) {
+function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onUpdatePreset, onDeletePreset }) {
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
   const [agent, setAgent] = useState('claude');
@@ -609,14 +609,18 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
   const [activateText, setActivateText] = useState('');
   const [appPortsText, setAppPortsText] = useState('');
   const [presetName, setPresetName] = useState('');
+  const [description, setDescription] = useState('');
+  const [editing, setEditing] = useState(null); // preset id being edited, or null (create mode)
+  const [showCustom, setShowCustom] = useState(false); // custom-provisioning <details> open state
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
 
   const togglePreset = (id) => setPresetIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   // Parse the custom fields into a provision object (applied on top of presets),
-  // or throw a friendly error. Returns null when no custom fields are set.
-  const buildCustom = () => {
+  // or throw a friendly error. Returns null when no custom fields are set —
+  // unless allowEmpty (editing a preset, where an all-blank field set is legal).
+  const buildCustom = (allowEmpty = false) => {
     let defines = {};
     const dt = definesText.trim();
     if (dt) {
@@ -628,8 +632,28 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
     const activate = activateText.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
     const appPorts = appPortsText.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean).map((s) => parseInt(s, 10));
     if (appPorts.some((p) => !Number.isInteger(p) || p < 1 || p > 65535)) throw new Error('App ports must be container port numbers (1-65535), e.g. 3000.');
-    if (!setupScript.trim() && !devScript.trim() && !dt && !activate.length && !appPorts.length) return null;
+    if (!allowEmpty && !setupScript.trim() && !devScript.trim() && !dt && !activate.length && !appPorts.length) return null;
     return { setupScript, devScript, defines, activate, appPorts };
+  };
+
+  // Load a saved preset's fields into the custom-provisioning form for in-place
+  // editing (PUT), and open the section so the fields are visible.
+  const startEdit = (p) => {
+    setEditing(p.id);
+    setPresetName(p.name || '');
+    setDescription(p.description || '');
+    setSetupScript(p.setupScript || '');
+    setDevScript(p.devScript || '');
+    setDefinesText(p.defines && Object.keys(p.defines).length ? JSON.stringify(p.defines, null, 2) : '');
+    setActivateText((p.activate || []).join(', '));
+    setAppPortsText((p.appPorts || []).join(', '));
+    setShowCustom(true);
+    setErr('');
+  };
+  // Leave edit mode and clear the form back to a blank create state.
+  const clearEdit = () => {
+    setEditing(null); setPresetName(''); setDescription('');
+    setSetupScript(''); setDevScript(''); setDefinesText(''); setActivateText(''); setAppPortsText('');
   };
 
   const create = async () => {
@@ -643,17 +667,25 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
   const savePreset = async () => {
     setErr('');
     const nm = presetName.trim();
-    if (!nm) { setErr('Enter a name to save the custom fields as a preset.'); return; }
+    if (!nm) { setErr(editing ? 'Preset name is required.' : 'Enter a name to save the custom fields as a preset.'); return; }
     let custom;
-    try { custom = buildCustom(); } catch (e) { setErr(e.message); return; }
-    if (!custom) { setErr('Fill in at least one custom field to save as a preset.'); return; }
-    try { await onSavePreset({ name: nm, ...custom }); setPresetName(''); }
-    catch (e) { setErr(e.message); }
+    // Editing may legitimately save an all-blank field set; creating cannot.
+    try { custom = buildCustom(!!editing); } catch (e) { setErr(e.message); return; }
+    if (!editing && !custom) { setErr('Fill in at least one custom field to save as a preset.'); return; }
+    const payload = { name: nm, description: description.trim(), ...custom };
+    try {
+      if (editing) { await onUpdatePreset(editing, payload); clearEdit(); }
+      else { await onSavePreset(payload); setPresetName(''); setDescription(''); }
+    } catch (e) { setErr(e.message); }
   };
   const deletePreset = async (id) => {
     const p = presets.find((x) => x.id === id);
     if (!p || !confirm(`Delete preset "${p.name}"?`)) return;
-    try { await onDeletePreset(id); setPresetIds((prev) => prev.filter((x) => x !== id)); } catch (e) { setErr(e.message); }
+    try {
+      await onDeletePreset(id);
+      setPresetIds((prev) => prev.filter((x) => x !== id));
+      if (editing === id) clearEdit();
+    } catch (e) { setErr(e.message); }
   };
 
   return html`
@@ -679,11 +711,12 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
                 <span class="preset-name">${p.name}</span>
                 ${p.description && html`<span class="muted small">${p.description}</span>`}
               </label>
+              <button class="lnk small" title="Edit preset" onClick=${() => startEdit(p)}>✎</button>
               <button class="lnk danger small" title="Delete preset" onClick=${() => deletePreset(p.id)}>✕</button>
             </div>`)}
         </div>
-        <details class="custom-prov">
-          <summary>Custom provisioning (optional, applied after presets)</summary>
+        <details class="custom-prov" open=${showCustom} onToggle=${(e) => setShowCustom(e.target.open)}>
+          <summary>${editing ? html`Editing preset — <strong>${presetName || 'untitled'}</strong>` : 'Custom provisioning (optional, applied after presets)'}</summary>
           <label>Setup script <span class="muted small">— runs once in the workspace as <code>node</code> (cwd /home/node, WordPress at ./wp)</span>
             <textarea class="mono" rows="5" value=${setupScript} placeholder=${'#!/usr/bin/env bash\nset -euo pipefail\ncd /home/node\ngh repo clone owner/repo\n…'} onInput=${(e) => setSetupScript(e.target.value)}></textarea>
           </label>
@@ -700,8 +733,10 @@ function NewEnvModal({ presets, onClose, onCreate, onSavePreset, onDeletePreset 
             <input value=${appPortsText} placeholder="3000" onInput=${(e) => setAppPortsText(e.target.value)} />
           </label>
           <div class="row save-preset">
-            <input value=${presetName} placeholder="Save these custom fields as a preset named…" onInput=${(e) => setPresetName(e.target.value)} />
-            <button class="btn small ghost" onClick=${savePreset} disabled=${!presetName.trim()}>Save preset</button>
+            <input value=${presetName} placeholder=${editing ? 'Preset name…' : 'Save these custom fields as a preset named…'} onInput=${(e) => setPresetName(e.target.value)} />
+            <input value=${description} placeholder="Description (optional)" onInput=${(e) => setDescription(e.target.value)} />
+            <button class="btn small ghost" onClick=${savePreset} disabled=${!presetName.trim()}>${editing ? 'Update preset' : 'Save preset'}</button>
+            ${editing && html`<button class="lnk small" onClick=${clearEdit}>Cancel edit</button>`}
           </div>
         </details>
         ${err && html`<div class="err-msg">${err}</div>`}
@@ -1094,6 +1129,11 @@ function App() {
     await refresh();
     return p;
   };
+  const updatePreset = async (id, preset) => {
+    const p = await api(`/presets/${id}`, { method: 'PUT', body: JSON.stringify(preset) });
+    await refresh();
+    return p;
+  };
   const deletePreset = async (id) => {
     await api(`/presets/${id}`, { method: 'DELETE' });
     await refresh();
@@ -1164,7 +1204,7 @@ function App() {
               : html`Select a session, or <button class="btn" onClick=${() => setNewSession({})}>start a new one</button>.`}
           </div></section>`}
       ${newSession && html`<${NewSessionModal} envs=${envs} preselect=${newSession.preselect} onClose=${() => setNewSession(null)} onCreate=${createSession} />`}
-      ${showNewEnv && html`<${NewEnvModal} presets=${presets} onClose=${() => setShowNewEnv(false)} onCreate=${createEnv} onSavePreset=${savePreset} onDeletePreset=${deletePreset} />`}
+      ${showNewEnv && html`<${NewEnvModal} presets=${presets} onClose=${() => setShowNewEnv(false)} onCreate=${createEnv} onSavePreset=${savePreset} onUpdatePreset=${updatePreset} onDeletePreset=${deletePreset} />`}
       ${logEnvId && logEnv && html`<${LogViewer} env=${logEnv} onClose=${() => setLogEnvId(null)} />`}
       ${renameEnv && html`<${RenameEnvModal} env=${renameEnv} onClose=${() => setRenameEnv(null)} onSave=${renameEnvironment} />`}
       ${sshEnv && html`<${SshModal} env=${sshEnv} onClose=${() => setSshEnv(null)} />`}
